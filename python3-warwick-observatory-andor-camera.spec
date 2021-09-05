@@ -1,15 +1,12 @@
-Name:           python3-warwick-w1m-camera
-Version:        1.1.1
+Name:           python3-warwick-observatory-andor-camera
+Version:        20210907
 Release:        0
 License:        GPL3
-Summary:        Common backend code for the Warwick one-metre telescope camera daemon
+Summary:        Common code for the Andor camera daemon.
 Url:            https://github.com/warwick-one-metre/camd
 BuildArch:      noarch
 
 %description
-Part of the observatory software for the Warwick one-meter telescope.
-
-python36-warwick-w1m-camera holds the common camera code.
 
 %prep
 

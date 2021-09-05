@@ -5,16 +5,16 @@ RPMBUILD = rpmbuild --define "_topdir %(pwd)/build" \
         --define "_sourcedir %(pwd)"
 
 GIT_VERSION = $(shell git name-rev --name-only --tags --no-undefined HEAD 2>/dev/null || echo git-`git rev-parse --short HEAD`)
-SERVER_VERSION=$(shell awk '/Version:/ { print $$2; }' onemetre-camera-server.spec)
+SERVER_VERSION=$(shell awk '/Version:/ { print $$2; }' observatory-andor-camera-server.spec)
 
 all:
 	mkdir -p build
-	cp camd camd.bak
-	awk '{sub("SOFTWARE_VERSION = .*$$","SOFTWARE_VERSION = \"$(SERVER_VERSION) ($(GIT_VERSION))\""); print $0}' camd.bak > camd
-	${RPMBUILD} -ba onemetre-camera-server.spec
-	${RPMBUILD} -ba onemetre-camera-client.spec
-	${RPMBUILD} -ba python3-warwick-w1m-camera.spec
+	cp andor_camd andor_camd.bak
+	awk '{sub("SOFTWARE_VERSION = .*$$","SOFTWARE_VERSION = \"$(SERVER_VERSION) ($(GIT_VERSION))\""); print $0}' andor_camd.bak > andor_camd
+	${RPMBUILD} -ba observatory-andor-camera-server.spec
+	${RPMBUILD} -ba observatory-andor-camera-client.spec
+	${RPMBUILD} -ba python3-warwick-observatory-andor-camera.spec
+	${RPMBUILD} -ba onemetre-andor-camera-data.spec
 	mv build/noarch/*.rpm .
 	rm -rf build
-	mv camd.bak camd
-
+	mv andor_camd.bak andor_camd

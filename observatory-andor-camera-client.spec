@@ -1,17 +1,14 @@
-Name:      onemetre-camera-client
-Version:   2.2.1
+Name:      observatory-andor-camera-client
+Version:   20210910
 Release:   0
 Url:       https://github.com/warwick-one-metre/camd
-Summary:   Camera control client for the Warwick one-metre telescope.
+Summary:   Control client for Andor CCD cameras.
 License:   GPL-3.0
 Group:     Unspecified
 BuildArch: noarch
-Requires:  python3, python3-Pyro4, python3-warwick-observatory-common, python3-warwick-w1m-camera
+Requires:  python3, python3-Pyro4, python3-warwick-observatory-common, python3-warwick-observatory-andor-camera
 
 %description
-Part of the observatory software for the Warwick one-meter telescope.
-
-cam is a commandline utility for controlling the red and blue cameras.
 
 %build
 mkdir -p %{buildroot}%{_bindir}

@@ -1,0 +1,18 @@
+{
+  "daemon": "onemetre_red_camera",
+  "pipeline_daemon": "onemetre_pipeline",
+  "pipeline_handover_timeout": 10,
+  "log_name": "andor_camd@red",
+  "control_machines": ["OneMetreDome", "OneMetreTCS"],
+  "camera_serial": 12723,
+  "temperature_setpoint": -60,
+  "temperature_query_delay": 1,
+  "gain_index": 0,
+  "horizontal_shift_index": 2,
+  "overscan": [20, 20],
+  "filter": "Z",
+  "camera_id": "RED",
+  "output_path": "/var/tmp/",
+  "output_prefix": "red",
+  "expcount_path": "/var/tmp/red-counter.json"
+}

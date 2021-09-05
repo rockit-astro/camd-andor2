@@ -16,5 +16,6 @@
 
 """camd common code"""
 
+from .config import Config
 from .constants import CommandStatus, CameraStatus, CameraGain
 from .validation import configure_validation_schema
