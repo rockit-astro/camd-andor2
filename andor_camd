@@ -347,9 +347,10 @@ class CameraDaemon:
            Tagged frames are pushed to the acquisition queue
            for further processing on another thread"""
         try:
+            self._processing_stop_signal.value = False
             pixel_count = (self._geometry_width // self._geometry_bin_x) * \
                           (self._geometry_height // self._geometry_bin_y)
-            while not self._stop_acquisition:
+            while not self._stop_acquisition and not self._processing_stop_signal.value:
                 framedata = bytearray(pixel_count * 2)
 
                 # Delay before starting exposures
@@ -359,7 +360,7 @@ class CameraDaemon:
                         self._exposure_delay_condition.wait(self._exposure_delay)
 
                     self._sequence_exposure_delay_start_time = None
-                    if self._stop_acquisition:
+                    if self._stop_acquisition or self._processing_stop_signal.value:
                         break
 
                 with self._driver_lock:
