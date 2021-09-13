@@ -1,5 +1,5 @@
 Name:      observatory-andor-camera-server
-Version:   20210911
+Version:   20210913
 Release:   0
 Url:       https://github.com/warwick-one-metre/camd
 Summary:   Control server for Andor CCD cameras.
