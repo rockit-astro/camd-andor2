@@ -1080,7 +1080,7 @@ class CameraDaemon:
             return CommandStatus.Succeeded
 
     @Pyro4.expose
-    def start_sequence(self, count):
+    def start_sequence(self, count, quiet=False):
         """Starts an exposure sequence with a set number of frames, or 0 to run until stopped"""
         if not pyro_client_matches(self._config.control_ips):
             return CommandStatus.InvalidControlIP
@@ -1102,7 +1102,9 @@ class CameraDaemon:
             elif count > 1:
                 count_msg = str(count) + ' frames'
 
-            log.info(self._config.log_name, 'Starting exposure sequence (' + count_msg + ')')
+            if not quiet:
+                log.info(self._config.log_name, 'Starting exposure sequence (' + count_msg + ')')
+
             self._sequence_frame_limit = count
             self._sequence_frame_count = 0
             self._stop_acquisition = False
