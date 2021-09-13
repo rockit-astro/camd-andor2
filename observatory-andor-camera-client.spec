@@ -1,5 +1,5 @@
 Name:      observatory-andor-camera-client
-Version:   20210910
+Version:   20210913
 Release:   0
 Url:       https://github.com/warwick-one-metre/camd
 Summary:   Control client for Andor CCD cameras.

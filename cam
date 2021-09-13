@@ -278,9 +278,15 @@ if __name__ == '__main__':
         sys.exit(print_usage(configs))
 
     commands = {
+        'status': status,
         'temperature': set_temperature,
         'exposure': set_exposure,
-        'status': status,
+        'delay': set_exposure_delay,
+        'gain': set_gain,
+        'readout': set_horizontal_shift_speed,
+        'shutter': set_shutter,
+        'bin': set_binning,
+        'window': set_window,
         'start': start,
         'stop': stop,
         'init': initialize,
