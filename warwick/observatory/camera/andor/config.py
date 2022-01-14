@@ -53,12 +53,10 @@ CONFIG_SCHEMA = {
             }
         },
         'camera_serial': {
-            'type': 'integer'
+            'type': 'string'
         },
         'temperature_setpoint': {
-            'type': 'number',
-            'min': -60,
-            'max': 30,
+            'enum': [-45, -25, 15]
         },
         'temperature_query_delay': {
             'type': 'number',

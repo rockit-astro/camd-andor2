@@ -75,31 +75,11 @@ def status(config, *_):
         else:
             print('   Acquiring ' + TFmt.Bold + 'UNTIL STOPPED' + TFmt.Clear)
 
-    temperature_fmt = TFmt.Bold + TFmt.Red
-    if data['temperature_locked']:
-        temperature_status = TFmt.Bold + TFmt.Green + 'LOCKED' + TFmt.Clear
-        temperature_fmt = TFmt.Bold + TFmt.Green
-    elif not data['cooler_enabled']:
-        temperature_status = TFmt.Bold + TFmt.Red + 'COOLING DISABLED' + TFmt.Clear
-        temperature_fmt = TFmt.Bold
-    else:
-        temperature_status = TFmt.Bold + 'LOCKING ON {:.0f}\u00B0C'.format(
-            data['target_temperature']) + TFmt.Clear
+    temperature_status = data['temperature_status']
+    temperature_fmt = TFmt.Bold
 
     print('   Temperature is ' + temperature_fmt + '{:.0f}'.format(data['temperature']) + \
           '\u00B0C' + TFmt.Clear + ' (' + temperature_status + ')')
-
-    shutter_mode = TFmt.Green + 'AUTO' if data['shutter_enabled'] else TFmt.Red + 'DARK'
-    print('   Shutter mode is ' + TFmt.Bold + shutter_mode + TFmt.Clear)
-    print('   Pre-amp gain is ' + CameraGain.label(data['gain_index']) + ' (' + \
-        TFmt.Bold + '{} e/ADU'.format(data['gain_factor']) + TFmt.Clear + ')')
-    print('   Readout speed is ' + TFmt.Bold + '{:.2f} MHz'.format(
-        data['horizontal_shift_speed_mhz']) + TFmt.Clear)
-    print('   Readout window is {4}({0}, {1}, {2}, {3}) px{5}'.format(
-        data['geometry_x'], data['geometry_y'], data['geometry_width'], data['geometry_height'],
-        TFmt.Bold, TFmt.Clear))
-    print('   Readout binning is {2}{0} x {1} px{3}'.format(
-        data['geometry_bin_x'], data['geometry_bin_y'], TFmt.Bold, TFmt.Clear))
 
     exposure_label = TFmt.Bold + '{:.2f} s'.format(data['exposure_time']) + TFmt.Clear
     if data['state'] == CameraStatus.Waiting:

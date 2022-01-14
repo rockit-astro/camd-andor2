@@ -19,47 +19,29 @@
 
 # pylint: disable=too-many-return-statements
 # pylint: disable=too-many-branches
-# pylint: disable=too-many-statements
-# pylint: disable=too-many-lines
 # pylint: disable=too-many-instance-attributes
 
 import argparse
-from ctypes import c_bool, c_float, c_int32, c_int, c_uint16, c_long, byref, create_string_buffer, CDLL
+from ctypes import c_bool
 import datetime
 import json
 from multiprocessing import Process, Queue, Value
 import os.path
 import pathlib
 import shutil
+import sys
 import threading
 import time
+import traceback
 from astropy.io import fits
-import numpy
+import numpy as np
 import Pyro4
 from warwick.observatory.common import daemons, log, TryLock
 from warwick.observatory.common.helpers import pyro_client_matches
-from warwick.observatory.camera.andor import Config, CommandStatus, CameraStatus
+from warwick.observatory.camera.andor import Config, CommandStatus, CameraStatus, atcore
 
 # Set automatically when generating RPM package
 SOFTWARE_VERSION = "UNKNOWN"
-
-
-class AndorStatus:
-    """Status codes returned by libandor"""
-    Success = 20002
-
-    # Temperature status
-    TemperatureStabilized = 20036
-    TemperatureOff = 20034
-
-    # Setting readout geometry
-    DrvP1Invalid = 20066
-    DrvP2Invalid = 20067
-    DrvP3Invalid = 20068
-    DrvP4Invalid = 20069
-    DrvP5Invalid = 20076
-    DrvP6Invalid = 20077
-
 
 def process_frames(process_queue, stop_signal, camera_id, filter_name, output_path,
                    log_name, pipeline_daemon_name, pipeline_handover_timeout):
@@ -96,8 +78,6 @@ def process_frames(process_queue, stop_signal, camera_id, filter_name, output_pa
                 frame['win_x'], frame['win_x'] + frame['win_width'] - 1,
                 frame['win_y'], frame['win_y'] + frame['win_height'] - 1),
              '[x1:x2,y1:y2] readout region (detector coords)'),
-            ('CCD-GAIN', frame['gain'], '[e-/DN] nominal readout gain'),
-            ('CCD-RSPD', frame['horizontal_shift_speed'], '[MHz] CCD readout speed'),
             ('SHUTTER', 'AUTO' if frame['shutter_enabled'] else 'CLOSED', 'shutter mode'),
             ('IMAG-RGN', '[{}:{},{}:{}]'.format(
                 frame['image_x1'], frame['image_x2'],
@@ -105,8 +85,6 @@ def process_frames(process_queue, stop_signal, camera_id, filter_name, output_pa
              '[x1:x2,y1:y2] image region (image coords)'),
             ('EXPCNT', frame['exposure_count'], 'running exposure count since EXPCREF'),
             ('EXPCREF', frame['exposure_count_reference'], 'date the exposure counter was reset'),
-            ('SHTRCNT', frame['shutter_count'], 'running shutter count since SHTRCREF'),
-            ('SHTRCREF', frame['shutter_count_reference'], 'date the shutter counter was reset'),
         ]
 
         hdu = fits.PrimaryHDU(frame['data'])
@@ -138,60 +116,31 @@ def process_frames(process_queue, stop_signal, camera_id, filter_name, output_pa
             stop_signal.value = True
             log.error(log_name, 'Failed to hand frame to pipeline (' + str(e) + ')')
 
-
 class CameraDaemon:
     """Daemon interface for andor camera"""
     def __init__(self, config):
         self._config = config
         self._status = CameraStatus.Disabled
 
-        self._driver = None
-        self._driver_lock = threading.Lock()
+        self._sdk = atcore.ATCore()
+        self._handle = None
 
-        self._status_condition = threading.Condition()
         self._command_lock = threading.Lock()
+        self._status_lock = threading.Lock()
 
         self._camera_model = 'unknown'
 
         self._temperature = 0
-        self._temperature_locked = False
-        self._cooler_enabled = False
-        self._target_temperature = config.temperature_setpoint
 
-        # Temperature limits: loaded during init
-        self._min_temperature = 0
-        self._max_temperature = 0
+        self._temperature_status = None
+        self._target_temperature = config.temperature_setpoint
 
         # CCD size: loaded during init
         self._ccd_width = 0
         self._ccd_height = 0
 
-        # Readout geometry: defaults loaded during init
-        self._geometry_bin_x = 0
-        self._geometry_bin_y = 0
-        self._geometry_x = 0
-        self._geometry_y = 0
-        self._geometry_width = 0
-        self._geometry_height = 0
-
-        # Image geometry: masking away the overscan on the red camera
-        self._geometry_image_x1 = 0
-        self._geometry_image_x2 = 0
-        self._geometry_image_y1 = 0
-        self._geometry_image_y2 = 0
-
-        # Shutter enabled (opens during exposures), or remains closed
-        self._shutter_enabled = False
-
-        # Gain index. For blue camera: 0 = 1x, 1 = 2x, 2 = 4x
-        self._gains = []
-        self._gain_index = config.gain_index
         self._exposure_time = 1
         self._exposure_delay = 0
-
-        # Horizontal shift speeds in MHz: loaded during init
-        self._horizontal_shift_speeds = []
-        self._horizontal_shift_speed_index = config.horizontal_shift_index
 
         # Limit and number of frames acquired during the next sequence
         # Set to 0 to run continuously
@@ -217,14 +166,10 @@ class CameraDaemon:
                 data = json.load(infile)
                 self._exposure_count = data['exposure_count']
                 self._exposure_count_reference = data['exposure_reference']
-                self._shutter_count = data['shutter_count']
-                self._shutter_count_reference = data['shutter_reference']
         except Exception:
             now = datetime.datetime.utcnow().strftime('%Y-%m-%d')
             self._exposure_count = 0
             self._exposure_count_reference = now
-            self._shutter_count = 0
-            self._shutter_count_reference = now
 
         # Thread that runs the exposure sequence
         # Initialized by start() method
@@ -256,14 +201,11 @@ class CameraDaemon:
         """Background thread that polls the camera status"""
         while True:
             # Query temperature
-            with self._driver_lock:
-                if self._driver is not None:
+            with self._status_lock:
+                if self._handle is not None:
                     # Query temperature status
-                    temp = c_float()
-                    status = self._driver.GetTemperatureF(byref(temp))
-                    self._temperature = temp.value
-                    self._temperature_locked = status == AndorStatus.TemperatureStabilized
-                    self._cooler_enabled = status != AndorStatus.TemperatureOff
+                    self._temperature = self._sdk.get_float(self._handle, "SensorTemperature")
+                    self._temperature_status = self._sdk.get_enum_string(self._handle, "TemperatureStatus")
                 else:
                     self._status = CameraStatus.Disabled
 
@@ -271,75 +213,27 @@ class CameraDaemon:
 
     def __set_target_temperature_and_cooler(self, target_temperature, cooler_enabled):
         """Set the camera temperature and cooler configuration
-           Returns an AndorStatus return code
+           Returns bool indicating success
         """
-
-        with self._driver_lock:
-            if self._driver is None:
-                return False
-
-            status = self._driver.SetTemperature(c_int(target_temperature))
-            if status != AndorStatus.Success:
-                print('failed to set temperature to {} with status {}'.format(target_temperature, status))
-                return status
-
-            self._target_temperature = target_temperature
-            if cooler_enabled:
-                status = self._driver.CoolerON()
-            else:
-                status = self._driver.CoolerOFF()
-
-            return status
-
-    def __set_shutter(self, enabled):
-        """Set the shutter to open automatically or stay closed
-           Returns an AndorStatus return code
-        """
-        with self._driver_lock:
-            value = c_int(0 if enabled else 2)
-            status = self._driver.SetShutter(c_int(1), value, c_int(50), c_int(50))
-            if status == AndorStatus.Success:
-                self._shutter_enabled = enabled
-            else:
-                mode = 'auto' if enabled else 'closed'
-                print('failed to set shutter {} with status {}'.format(mode, status))
-            return status
-
-    def __set_gain_index(self, gain_index):
-        """Sets the gain to the requested index
-           Returns an AndorStatus return code
-        """
-        with self._driver_lock:
-            status = self._driver.SetPreAmpGain(c_int(gain_index))
-            if status == AndorStatus.Success:
-                self._gain_index = gain_index
-            else:
-                print('failed to set gain {} with status {}'.format(gain_index, status))
-        return status
-
-    def __set_horizontal_shift_index(self, shift_speed_index):
-        """Sets the horizontal shift speed to the requested index
-           Returns an AndorStatus return code
-        """
-        with self._driver_lock:
-            status = self._driver.SetHSSpeed(c_int(0), c_int(shift_speed_index))
-            if status == AndorStatus.Success:
-                self._horizontal_shift_speed_index = shift_speed_index
-            else:
-                print('failed to set horizontal shift {} with status {}'.format(shift_speed_index, status))
-        return status
+        try:
+            self._sdk.set_enum_string(self._handle, 'TemperatureControl', '{:.1f}'.format(target_temperature))
+            self._sdk.set_bool(self._handle, 'SensorCooling', cooler_enabled)
+            return True
+        except:
+            traceback.print_exc(file=sys.stdout)
+        return False
 
     def __set_exposure_time(self, exposure_seconds):
         """Sets the given exposure time in seconds
-           Returns an AndorStatus return code
+           Returns bool indicating success
         """
-        with self._driver_lock:
-            status = self._driver.SetExposureTime(c_float(exposure_seconds))
-            if status == AndorStatus.Success:
-                self._exposure_time = exposure_seconds
-            else:
-                print('failed to set exposure ({}s) with status {}'.format(exposure_seconds, status))
-        return status
+        try:
+            self._sdk.set_float(self._handle, "ExposureTime", exposure_seconds)
+            self._exposure_time = exposure_seconds
+            return True
+        except Exception:
+            traceback.print_exc(file=sys.stdout)
+        return False
 
     def __run_exposure_sequence(self):
         """Worker thread that acquires frames and their times.
@@ -347,11 +241,7 @@ class CameraDaemon:
            for further processing on another thread"""
         try:
             self._processing_stop_signal.value = False
-            pixel_count = (self._geometry_width // self._geometry_bin_x) * \
-                          (self._geometry_height // self._geometry_bin_y)
             while not self._stop_acquisition and not self._processing_stop_signal.value:
-                framedata = bytearray(pixel_count * 2)
-
                 # Delay before starting exposures
                 if self._exposure_delay > 0:
                     self._sequence_exposure_delay_start_time = datetime.datetime.utcnow()
@@ -362,47 +252,54 @@ class CameraDaemon:
                     if self._stop_acquisition or self._processing_stop_signal.value:
                         break
 
-                with self._driver_lock:
+                image_bytes = self._sdk.get_int(self._handle, "ImageSizeBytes")
+                raw_buffer = np.empty((image_bytes,), dtype='B')
+
+                print('image bytes', image_bytes)
+                print('Exposure time', self._sdk.get_float(self._handle, 'ExposureTime'))
+                print('FrameRate', self._sdk.get_float(self._handle, 'FrameRate'))
+                print('TriggerMode', self._sdk.get_enum_string(self._handle, 'TriggerMode'))
+
+                try:
+                    self._sdk.queue_buffer(self._handle, raw_buffer.ctypes.data, image_bytes)
+
                     start_time = datetime.datetime.utcnow()
-                    status = self._driver.StartAcquisition()
-                    if status != AndorStatus.Success:
-                        log.error(self._config.log_name, 'Failed to start exposure sequence (' + str(status) + ')')
-                        break
+                    self._sdk.command(self._handle, "AcquisitionStart")
+                except Exception:
+                    traceback.print_exc(file=sys.stdout)
+                    log.error(self._config.log_name, 'Failed to start exposure sequence')
+                    break
 
                 self._sequence_exposure_start_time = start_time
 
-                # TODO: thread safety: do we need the driver lock?
-                status = self._driver.WaitForAcquisition()
-                if status != AndorStatus.Success:
-                    log.error(self._config.log_name, 'Failed to wait for acquisition (' + str(status) + ')')
+                try:
+                    self._sdk.wait_buffer(self._handle)
+                    end_time = datetime.datetime.utcnow()
+                except Exception:
+                    traceback.print_exc(file=sys.stdout)
+                    log.error(self._config.log_name, 'Failed to wait for exposure to complete')
                     break
 
-                end_time = datetime.datetime.utcnow()
-                cdata = (c_uint16 * pixel_count).from_buffer(framedata)
-                status = self._driver.GetAcquiredData16(byref(cdata), c_long(pixel_count))
-                if status != AndorStatus.Success:
-                    if not self._stop_acquisition:
-                        log.error(self._config.log_name, 'Failed to query frame data (' + str(status) + ')')
-                    break
+                config = {
+                    'aoiheight': self._sdk.get_int(self._handle, "AOIHeight"),
+                    'aoiwidth': self._sdk.get_int(self._handle, "AOIWidth"),
+                    'aoistride': self._sdk.get_int(self._handle, "AOIStride"),
+                    'pixelencoding': self._sdk.get_enum_string(self._handle, "PixelEncoding")
+                }
+
+                np_arr = raw_buffer[0:config['aoiheight'] * config['aoistride']]
+                np_d = np_arr.view(dtype='H')
+                np_d = np_d.reshape(config['aoiheight'], round(np_d.size / config['aoiheight']))
+                data = np_d[0:config['aoiheight'], 0:config['aoiwidth']]
 
                 self._exposure_count += 1
-                if self._shutter_enabled:
-                    self._shutter_count += 1
 
                 # Save updated counts to disk
                 with open(self._counter_filename, 'w') as outfile:
                     json.dump({
                         'exposure_count': self._exposure_count,
                         'exposure_reference': self._exposure_count_reference,
-                        'shutter_count': self._shutter_count,
-                        'shutter_reference': self._shutter_count_reference
                     }, outfile)
-
-                shape = (self._geometry_height // self._geometry_bin_y,
-                         self._geometry_width // self._geometry_bin_x)
-                # pylint: disable=no-member
-                data = numpy.frombuffer(framedata, dtype=numpy.uint16).reshape(shape)
-                # pylint: enable=no-member
 
                 self._processing_queue.put({
                     'data': data,
@@ -412,24 +309,20 @@ class CameraDaemon:
                     'camera_desc': self._camera_model + ' ({})'.format(self._config.camera_serial),
                     'temperature': self._temperature,
                     'target_temperature': self._target_temperature,
-                    'temperature_locked': self._temperature_locked,
-                    'horizontal_shift_speed': self._horizontal_shift_speeds[self._horizontal_shift_speed_index],
-                    'gain': self._gains[self._gain_index],
-                    'shutter_enabled': self._shutter_enabled,
+                    'temperature_locked': self._temperature_status == 'Stabilised',
+                    'shutter_enabled': True,
                     'exposure_count': self._exposure_count,
                     'exposure_count_reference': self._exposure_count_reference,
-                    'shutter_count': self._shutter_count,
-                    'shutter_count_reference': self._shutter_count_reference,
-                    'win_x': self._geometry_x,
-                    'win_y': self._geometry_y,
-                    'win_width': self._geometry_width,
-                    'win_height': self._geometry_height,
-                    'bin_x': self._geometry_bin_x,
-                    'bin_y': self._geometry_bin_y,
-                    'image_x1': self._geometry_image_x1,
-                    'image_x2': self._geometry_image_x2,
-                    'image_y1': self._geometry_image_y1,
-                    'image_y2': self._geometry_image_y2,
+                    'win_x': 1,
+                    'win_y': 1,
+                    'win_width': self._ccd_width,
+                    'win_height': self._ccd_height,
+                    'bin_x': 1,
+                    'bin_y': 1,
+                    'image_x1': 1,
+                    'image_x2': 1 + self._ccd_width,
+                    'image_y1': 1,
+                    'image_y2': 1 + self._ccd_height
                 })
 
                 # Continue exposure sequence?
@@ -454,14 +347,14 @@ class CameraDaemon:
                 return CommandStatus.CameraNotInitialized
 
             if temperature is None:
-                status = self.__set_target_temperature_and_cooler(self._target_temperature, False)
+                success = self.__set_target_temperature_and_cooler(self._target_temperature, False)
             else:
-                if temperature < self._min_temperature or temperature > self._max_temperature:
+                if '{:.1f}'.format(temperature) not in ['-45.0', '-25.0', '15.0']:
                     return CommandStatus.TemperatureOutsideLimits
 
-                status = self.__set_target_temperature_and_cooler(temperature, True)
+                success = self.__set_target_temperature_and_cooler(temperature, True)
 
-            if status != AndorStatus.Success:
+            if not success:
                 return CommandStatus.Failed
 
             if not quiet:
@@ -476,8 +369,6 @@ class CameraDaemon:
         """Returns a dictionary containing the current camera state"""
         data = {'state': self._status}
         if self._status != CameraStatus.Disabled:
-            shift_mhz = self._horizontal_shift_speeds[self._horizontal_shift_speed_index]
-            gain_factor = self._gains[self._gain_index]
 
             # Estimate the current frame progress based on the time delta
             exposure_progress = 0
@@ -496,24 +387,18 @@ class CameraDaemon:
 
             data.update({
                 'temperature': self._temperature,
-                'temperature_locked': self._temperature_locked,
+                'temperature_locked': self._temperature_status == 'Stabilised',
+                'temperature_status': self._temperature_status,
                 'target_temperature': self._target_temperature,
-                'cooler_enabled': self._cooler_enabled,
-                'shutter_enabled': self._shutter_enabled,
+                'shutter_enabled': True,
+                'window': [
+                    0, self._ccd_width,
+                    0, self._ccd_height,
+                ],
                 'exposure_time': self._exposure_time,
                 'exposure_progress': exposure_progress,
                 'delay_time': self._sequence_exposure_delay_start_time,
                 'delay_progress': delay_progress,
-                'gain_index': self._gain_index,
-                'gain_factor': gain_factor,
-                'horizontal_shift_speed_index': self._horizontal_shift_speed_index,
-                'horizontal_shift_speed_mhz': shift_mhz,
-                'geometry_bin_x': self._geometry_bin_x,
-                'geometry_bin_y': self._geometry_bin_y,
-                'geometry_x': self._geometry_x,
-                'geometry_y': self._geometry_y,
-                'geometry_width': self._geometry_width,
-                'geometry_height': self._geometry_height,
                 'sequence_frame_limit': self._sequence_frame_limit,
                 'sequence_frame_count': self._sequence_frame_count,
             })
@@ -533,198 +418,65 @@ class CameraDaemon:
                 return CommandStatus.CameraNotUninitialized
 
             self._status = CameraStatus.Initializing
-            print('initializing driver')
-            driver = CDLL('libandor.so')
             try:
-                num_cameras = c_int32()
-                status = driver.GetAvailableCameras(byref(num_cameras))
-                if status != AndorStatus.Success or num_cameras.value == 0:
+                num_cameras = self._sdk.get_int(self._sdk.AT_HNDL_SYSTEM, "DeviceCount")
+                if num_cameras == 0:
                     return CommandStatus.CameraNotFound
 
-                # Enumerate cameras to find target
-                handle = c_int32()
-                model = create_string_buffer(4096)
-                serial = c_int()
                 found = False
-                print('{} cameras available'.format(num_cameras.value))
-                for i in range(num_cameras.value):
-                    status = driver.GetCameraHandle(c_int32(i), byref(handle))
-                    if status != AndorStatus.Success:
-                        print('failed to query handle for camera {}: status {}'.format(i, status))
-                        continue
 
-                    status = driver.SetCurrentCamera(handle)
-                    if status != AndorStatus.Success:
-                        print('failed to select camera {}: status {}'.format(i, status))
-                        continue
+                print('{} cameras available'.format(num_cameras))
+                for i in range(num_cameras):
+                    handle = self._sdk.open(i)
+                    model = self._sdk.get_string(handle, "CameraModel")
+                    serial = self._sdk.get_string(handle, "SerialNumber")
 
-                    status = driver.Initialize('/usr/local/etc/andor'.encode('ascii'))
-                    if status != AndorStatus.Success:
-                        print('failed to initialize camera {}: status {}'.format(i, status))
-                        continue
-
-                    status = driver.GetHeadModel(model)
-                    if status != AndorStatus.Success:
-                        print('failed to query camera {} model: status {}'.format(i, status))
-                        driver.ShutDown()
-                        continue
-
-                    status = driver.GetCameraSerialNumber(byref(serial))
-                    if status != AndorStatus.Success:
-                        print('failed to query camera {} serial: status {}'.format(i, status))
-                        driver.ShutDown()
-                        continue
-
-                    print('camera {} is {} ({})'.format(i, model.value.decode('ascii'), serial.value))
-
-                    if serial.value == self._config.camera_serial:
+                    print('camera {} is {} ({})'.format(i, model, serial))
+                    if serial == self._config.camera_serial:
                         found = True
                         break
-
-                    driver.ShutDown()
+                    else:
+                        self._sdk.close(handle)
 
                 if not found:
-                    driver = None
                     print('camera with serial {} was not found'.format(self._config.camera_serial))
                     return CommandStatus.CameraNotFound
 
-                # Query cooler temperature limits
-                min_temp = c_int(self._min_temperature)
-                max_temp = c_int(self._max_temperature)
-                status = driver.GetTemperatureRange(byref(min_temp), byref(max_temp))
-                if status != AndorStatus.Success:
-                    print('failed to query camera temperature limits with status ' + str(status))
-                    return CommandStatus.Failed
-
                 # Query detector size
-                width = c_int(self._ccd_width)
-                height = c_int(self._ccd_height)
-                status = driver.GetDetector(byref(width), byref(height))
-                if status != AndorStatus.Success:
-                    print('failed to query detector size with status {}'.format(status))
-                    return CommandStatus.Failed
-
-                # Set default shutter
-                shutter = c_int(0 if self._shutter_enabled else 2)
-                status = driver.SetShutter(c_int(1), shutter, c_int(50), c_int(50))
-                if status != AndorStatus.Success:
-                    print('failed to set shutter closed with status {}'.format(status))
-                    return CommandStatus.Failed
+                width = self._sdk.get_int(handle, 'SensorWidth')
+                height = self._sdk.get_int(handle, 'SensorHeight')
 
                 # Configure standard 2D image readout
-                status = driver.SetReadMode(c_int(4))
-                if status != AndorStatus.Success:
-                    print('failed to set image readout mode with status {}'.format(status))
-                    return CommandStatus.Failed
+                print('TriggerMode', self._sdk.get_enum_string(handle, 'TriggerMode'))
 
-                # Camera does not support hardware timing, so we are forced to do individual
-                # exposures via software
-                status = driver.SetAcquisitionMode(c_int(1))
-                if status != AndorStatus.Success:
-                    print('failed to set acquisition mode with status {}'.format(status))
-                    return CommandStatus.Failed
+                self._sdk.set_enum_string(handle, 'PixelEncoding', 'Mono16')
+                self._sdk.set_enum_string(handle, 'AOIBinning', '1x1')
+                self._sdk.set_enum_string(handle, 'TriggerMode', 'Internal')
+                self._sdk.set_enum_string(handle, 'CycleMode', 'Fixed')
+                self._sdk.set_int(handle, 'FrameCount', 1)
+                self._sdk.set_float(handle, 'ExposureTime', self._exposure_time)
+                self._sdk.set_enum_string(handle, 'GainMode', 'High dynamic range (16-bit)')
+                self._sdk.set_enum_string(handle, 'TemperatureControl', '{:.1f}'.format(self._config.temperature_setpoint))
+                self._sdk.set_bool(handle, 'SensorCooling', True)
 
-                # Set default exposure time
-                status = driver.SetExposureTime(c_float(self._exposure_time))
-                if status != AndorStatus.Success:
-                    print('failed to set default exposure time with status {}'.format(status))
-                    return CommandStatus.Failed
+                with self._status_lock:
+                    self._handle = handle
+                    self._camera_model = model
+                    self._ccd_width = width
+                    self._ccd_height = height
 
-                # Query gains
-                gain_count = c_int(0)
-                status = driver.GetNumberPreAmpGains(byref(gain_count))
-                if status != AndorStatus.Success:
-                    print('failed to query gain count with status ' + str(status))
-                    return CommandStatus.Failed
-
-                gains = []
-                gain = c_float(0)
-                for i in range(gain_count.value):
-                    status = driver.GetPreAmpGain(c_int(i), byref(gain))
-                    if status != AndorStatus.Success:
-                        print('failed to query gain for index {} with status {}'.format(i, status))
-                        return CommandStatus.Failed
-                    gains.append(gain.value)
-
-                # Set default gain index
-                status = driver.SetPreAmpGain(c_int(self._gain_index))
-                if status != AndorStatus.Success:
-                    print('failed to set default gain index with status {}'.format(status))
-                    return CommandStatus.Failed
-
-                # Query horizontal shift speeds
-                # Assumes that there is only one readout channel, and no electron multiplication
-                shift_count = c_int(0)
-                status = driver.GetNumberHSSpeeds(c_int(0), c_int(0), byref(shift_count))
-                if status != AndorStatus.Success:
-                    print('failed to query horizontal shift speed count with status ' + \
-                          str(status))
-                    return CommandStatus.Failed
-
-                speeds = []
-                speed = c_float(0)
-                for i in range(shift_count.value):
-                    status = driver.GetHSSpeed(c_int(0), c_int(0), c_int(i), byref(speed))
-                    if status != AndorStatus.Success:
-                        print('failed to query horizontal shift speed for index {} with status {}'.format(i, status))
-                        return CommandStatus.Failed
-                    speeds.append(speed.value)
-
-                # Set default horizontal shift index
-                status = driver.SetHSSpeed(c_int(0), c_int(self._horizontal_shift_speed_index))
-                if status != AndorStatus.Success:
-                    print('failed to set default horizontal shift speed index with status ' + str(status))
-                    return CommandStatus.Failed
-
-                # Set default readout geometry
-                status = driver.SetImage(c_int(1), c_int(1),
-                                         c_int(1), c_int(width.value),
-                                         c_int(1), c_int(height.value))
-                if status != AndorStatus.Success:
-                    print('failed to set default readout geometry with status {}'.format(status))
-                    return CommandStatus.Failed
-
-                # Set default temperature
-                status = driver.SetTemperature(c_int(self._target_temperature))
-                if status != AndorStatus.Success:
-                    print('failed to set default target temperature with status {}'.format(status))
-                    return CommandStatus.Failed
-
-                status = driver.CoolerON()
-                if status != AndorStatus.Success:
-                    print('failed to enable cooling with status {}'.format(status))
-                    return CommandStatus.Failed
-
-                with self._driver_lock:
-                    self._driver = driver
-                    self._camera_model = model.value.decode('ascii')
-                    self._min_temperature = min_temp.value
-                    self._max_temperature = max_temp.value
-                    self._ccd_width = width.value
-                    self._ccd_height = height.value
-                    self._geometry_bin_x = 1
-                    self._geometry_bin_y = 1
-                    self._geometry_x = 1
-                    self._geometry_y = 1
-                    self._geometry_width = self._ccd_width
-                    self._geometry_height = self._ccd_height
-
-                    self._geometry_image_x1 = 1 + self._config.overscan[0]
-                    self._geometry_image_x2 = self._ccd_width - self._config.overscan[1]
-                    self._geometry_image_y1 = 1
-                    self._geometry_image_y2 = self._ccd_height
-
-                    self._gains = gains
-                    self._horizontal_shift_speeds = speeds
                     self._status = CameraStatus.Idle
                     print('camera {} ({}) initalized'.format(self._camera_model, self._config.camera_serial))
 
                 return CommandStatus.Succeeded
+            except Exception:
+                traceback.print_exc(file=sys.stdout)
+                return CommandStatus.Failed
             finally:
                 # Clean up on failure
                 if self._status != CameraStatus.Idle:
-                    if driver is not None:
-                        driver.ShutDown()
+                    if handle:
+                        self._sdk.close(handle)
                     self._status = CameraStatus.Disabled
                     log.error(self._config.log_name, 'Failed to initialize camera')
                 else:
@@ -763,44 +515,40 @@ class CameraDaemon:
                 return CommandStatus.CameraNotIdle
 
             # Reset cooling
-            temperature = params.get('temperature', self._config.temperature_setpoint)
+            temperature = params.get('temperature', self._config['temperature'])
             cooler = params.get('cooler', True)
-            if self.__set_target_temperature_and_cooler(temperature, cooler) != AndorStatus.Success:
+            if not self.__set_target_temperature_and_cooler(temperature, cooler):
                 return CommandStatus.Failed
 
-            if not quiet:
-                log.info(self._config.log_name, 'Target temperature set to ' + str(temperature))
-                log.info(self._config.log_name, 'Cooler ' + ('enabled' if cooler else 'disabled'))
+            log.info(self._log_table, 'Target temperature set to ' + str(temperature))
+            log.info(self._log_table, 'Cooler ' + ('enabled' if cooler else 'disabled'))
 
             # Reset shutter
-            shutter = params.get('shutter', False)
-            if self.__set_shutter(shutter) != AndorStatus.Success:
-                return CommandStatus.Failed
+            #shutter = params.get('shutter', False)
+            #if self.__set_shutter(shutter) != AndorStatus.Success:
+            #    return CommandStatus.Failed
 
-            if not quiet:
-                log.info(self._config.log_name, 'Shutter set to ' + ('auto' if shutter else 'closed'))
+            #log.info(self._log_table, 'Shutter set to ' + ('auto' if shutter else 'closed'))
 
             # Reset gain
-            gain_index = params.get('gainindex', self._config.gain_index)
-            gain_status = self.__set_gain_index(gain_index)
-            if gain_status == AndorStatus.DrvP1Invalid:
-                return CommandStatus.InvalidGainIndex
-            if gain_status != AndorStatus.Success:
-                return CommandStatus.Failed
+            #gain_index = params.get('gainindex', self._config['gainindex'])
+            #gain_status = self.__set_gain_index(gain_index)
+            #if gain_status == AndorStatus.DrvP1Invalid:
+            #    return CommandStatus.InvalidGainIndex
+            #if gain_status != AndorStatus.Success:
+            #    return CommandStatus.Failed
 
-            if not quiet:
-                log.info(self._config.log_name, 'Gain index set to ' +  str(gain_index))
+            #log.info(self._log_table, 'Gain index set to ' +  str(gain_index))
 
             # Reset readout speed
-            shift_speed_index = params.get('readoutindex', self._config.horizontal_shift_index)
-            readout_status = self.__set_horizontal_shift_index(shift_speed_index)
-            if readout_status == AndorStatus.DrvP2Invalid:
-                return CommandStatus.InvalidShiftSpeedIndex
-            if readout_status != AndorStatus.Success:
-                return CommandStatus.Failed
+            #shift_speed_index = params.get('readoutindex', self._config['horizontalshiftindex'])
+            #readout_status = self.__set_horizontal_shift_index(shift_speed_index)
+            #if readout_status == AndorStatus.DrvP2Invalid:
+            #    return CommandStatus.InvalidShiftSpeedIndex
+            #if readout_status != AndorStatus.Success:
+            #    return CommandStatus.Failed
 
-            if not quiet:
-                log.info(self._config.log_name, 'Readout speed index set to ' +  str(shift_speed_index))
+            #log.info(self._log_table, 'Readout speed index set to ' +  str(shift_speed_index))
 
             # Reset exposure delay
             self._exposure_delay = params.get('delay', 0)
@@ -810,103 +558,22 @@ class CameraDaemon:
 
             # Reset exposure time
             exposure = params.get('exposure', 1)
-            if self.__set_exposure_time(exposure) != AndorStatus.Success:
+            if not self.__set_exposure_time(exposure):
                 return CommandStatus.Failed
 
             if not quiet:
                 log.info(self._config.log_name, 'Exposure time set to {:.3f}s'.format(exposure))
 
             # Reset readout geometry
-            w = params.get('window', (1, 1, 1, 1, self._ccd_width, self._ccd_height))
-            if len(w) != 6:
-                return CommandStatus.InvalidWindow
+            #w = params.get('window', (1, 1, 1, 1, self._ccd_width, self._ccd_height))
+            #if len(w) != 6:
+            #    return CommandStatus.InvalidWindow
 
-            if not self.__set_ccd_geometry(w[0], w[1], w[2], w[3], w[4], w[5]):
-                return CommandStatus.InvalidWindow
+            #if not self.__set_ccd_geometry(w[0], w[1], w[2], w[3], w[4], w[5]):
+            #    return CommandStatus.InvalidWindow
 
-            if not quiet:
-                log.info(self._config.log_name, 'Binning set to {}x{}'.format(w[0], w[1]))
-                log.info(self._config.log_name, 'Window set to [{}:{},{}:{}]'.format(w[2], w[4], w[3], w[5]))
-
-            return CommandStatus.Succeeded
-
-    @Pyro4.expose
-    def set_shutter(self, enabled, quiet=False):
-        """Enable or disable the shutter"""
-        if not pyro_client_matches(self._config.control_ips):
-            return CommandStatus.InvalidControlIP
-
-        with TryLock(self._command_lock) as success:
-            if not success:
-                return CommandStatus.Blocked
-
-            if self._status == CameraStatus.Disabled:
-                return CommandStatus.CameraNotInitialized
-
-            if self._status != CameraStatus.Idle:
-                return CommandStatus.CameraNotIdle
-
-            if self.__set_shutter(enabled) != AndorStatus.Success:
-                return CommandStatus.Failed
-
-            if not quiet:
-                log.info(self._config.log_name, 'Shutter set to ' + ('auto' if enabled else 'closed'))
-
-            return CommandStatus.Succeeded
-
-    @Pyro4.expose
-    def set_gain(self, gain_index, quiet=False):
-        """Set the preamplifier gain index"""
-        if not pyro_client_matches(self._config.control_ips):
-            return CommandStatus.InvalidControlIP
-
-        with TryLock(self._command_lock) as success:
-            if not success:
-                return CommandStatus.Blocked
-
-            if self._status == CameraStatus.Disabled:
-                return CommandStatus.CameraNotInitialized
-
-            if self._status != CameraStatus.Idle:
-                return CommandStatus.CameraNotIdle
-
-            status = self.__set_gain_index(gain_index)
-            if status == AndorStatus.DrvP1Invalid:
-                return CommandStatus.InvalidGainIndex
-
-            if status != AndorStatus.Success:
-                return CommandStatus.Failed
-
-            if not quiet:
-                log.info(self._config.log_name, 'Gain index set to ' + str(gain_index))
-
-            return CommandStatus.Succeeded
-
-    @Pyro4.expose
-    def set_horizontal_shift(self, shift_speed_index, quiet=False):
-        """Set the horizontal shift speed index"""
-        if not pyro_client_matches(self._config.control_ips):
-            return CommandStatus.InvalidControlIP
-
-        with TryLock(self._command_lock) as success:
-            if not success:
-                return CommandStatus.Blocked
-
-            if self._status == CameraStatus.Disabled:
-                return CommandStatus.CameraNotInitialized
-
-            if self._status != CameraStatus.Idle:
-                return CommandStatus.CameraNotIdle
-
-            status = self.__set_horizontal_shift_index(shift_speed_index)
-            if status == AndorStatus.DrvP2Invalid:
-                return CommandStatus.InvalidShiftSpeedIndex
-            if status != AndorStatus.Success:
-                return CommandStatus.Failed
-
-            if not quiet:
-                log.info(self._config.log_name, 'Readout speed index set to ' + str(shift_speed_index))
-
+            #log.info(self._log_table, 'Binning set to {}x{}'.format(w[0], w[1]))
+            #log.info(self._log_table, 'Window set to [{}:{},{}:{}]'.format(w[2], w[4], w[3], w[5]))
             return CommandStatus.Succeeded
 
     @Pyro4.expose
@@ -925,7 +592,7 @@ class CameraDaemon:
             if self._status != CameraStatus.Idle:
                 return CommandStatus.CameraNotIdle
 
-            if self.__set_exposure_time(seconds) != AndorStatus.Success:
+            if not self.__set_exposure_time(seconds):
                 return CommandStatus.Failed
 
             if not quiet:
@@ -956,43 +623,6 @@ class CameraDaemon:
 
             return CommandStatus.Succeeded
 
-    def __set_ccd_geometry(self, bin_x, bin_y, x, y, width, height):
-        """Set the exposure readout geometry."""
-        with self._driver_lock:
-            status = self._driver.SetImage(c_int(bin_x), c_int(bin_y),
-                                           c_int(x), c_int(x + width - 1),
-                                           c_int(y), c_int(y + height - 1))
-            if status != AndorStatus.Success:
-                print('failed to set geometry [{},{}]({}, {}, {}, {}) with status {}'.format(
-                    bin_x, bin_y, x, y, width, height, status))
-                return False
-
-            self._geometry_bin_x = bin_x
-            self._geometry_bin_y = bin_y
-            self._geometry_x = x
-            self._geometry_y = y
-            self._geometry_width = width
-            self._geometry_height = height
-
-            # Round prescan and postscan up to nearest superpixel to avoid bleeding
-            prescan = int((self._config.overscan[0] + bin_x - 1) / bin_x)
-            postscan = int((self._config.overscan[1] + bin_x - 1) / bin_x)
-
-            # Work out how much pre/post scan columns are left in the requested window
-            window_x = int((x - 1) / bin_x)
-            self._geometry_image_x1 = 1 + max(prescan, int((x - 1) / bin_x)) - window_x
-            self._geometry_image_x2 = min(int(self._ccd_width / bin_x) - postscan, \
-                int((x + width - 1) / bin_x)) - window_x
-            self._geometry_image_y1 = 1 + int((y - 1) / bin_y)
-            self._geometry_image_y2 = int(height / bin_y)
-
-            # Window is completely in the overscan
-            if self._geometry_image_x2 <= self._geometry_image_x1:
-                self._geometry_image_x1 = self._geometry_image_x2 = 0
-                self._geometry_image_y1 = self._geometry_image_y2 = 0
-
-        return True
-
     @Pyro4.expose
     def set_binning(self, bin_x, bin_y, quiet=False):
         """Sets the CCD readout binning (both x and y)"""
@@ -1009,14 +639,7 @@ class CameraDaemon:
             if self._status != CameraStatus.Idle:
                 return CommandStatus.CameraNotIdle
 
-            if not self.__set_ccd_geometry(bin_x, bin_y, self._geometry_x, self._geometry_y,
-                                           self._geometry_width, self._geometry_height):
-                return CommandStatus.BinningIncompatibleWithWindow
-
-            if not quiet:
-                log.info(self._config.log_name, 'Binning set to ' + str(bin_x) + 'x' + str(bin_y))
-
-            return CommandStatus.Succeeded
+            return CommandStatus.Failed
 
     @Pyro4.expose
     def set_window(self, x, y, width, height, quiet=False):
@@ -1038,16 +661,7 @@ class CameraDaemon:
                     y + height - 1 > self._ccd_height:
                 return CommandStatus.WindowOutsideCCD
 
-            if not self.__set_ccd_geometry(self._geometry_bin_x, self._geometry_bin_x, x, y,
-                                           width, height):
-                return CommandStatus.WindowIncompatibleWithBinning
-
-            if not quiet:
-                region = '[' + str(x) + ':' + str(x + width - 1) + ',' + str(y) + ':' \
-                         + str(y + height - 1) + ']'
-                log.info(self._config.log_name, 'Window set to ' + region)
-
-            return CommandStatus.Succeeded
+            return CommandStatus.Failed
 
     @Pyro4.expose
     def shutdown(self):
@@ -1064,17 +678,15 @@ class CameraDaemon:
 
             # Complete the current exposure
             if self._acquisition_thread is not None:
-                with self._driver_lock:
-                    self._driver.AbortAcquisition()
+                self._sdk.command(self._handle, "AcquisitionStop")
 
                 print('shutdown: waiting for acquisition to complete')
                 self._stop_acquisition = True
                 self._acquisition_thread.join()
 
-            with self._driver_lock:
-                print('shutdown: disconnecting driver')
-                self._driver.ShutDown()
-                self._driver = None
+                print('shutdown: disconnecting camera')
+                if self._handle:
+                    self._sdk.close(self._handle)
 
             log.info(self._config.log_name, 'Shutdown camera')
             return CommandStatus.Succeeded
@@ -1131,8 +743,7 @@ class CameraDaemon:
 
         self._status = CameraStatus.Aborting
         log.info(self._config.log_name, 'Aborting exposure sequence')
-        with self._driver_lock:
-            self._driver.AbortAcquisition()
+        self._sdk.command(self._handle, "AcquisitionStop")
 
         self._sequence_frame_count = 0
         self._stop_acquisition = True
@@ -1142,6 +753,10 @@ class CameraDaemon:
 
         return CommandStatus.Succeeded
 
+    @Pyro4.expose
+    def set_shutter(self, enabled, quiet=False):
+        """Enable or disable the shutter"""
+        return CommandStatus.Succeeded
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Camera control daemon')
