@@ -1,5 +1,5 @@
 Name:      onemetre-andor-camera-data
-Version:   20210910
+Version:   20220722
 Release:   0
 Url:       https://github.com/warwick-one-metre/camd
 Summary:   Camera configuration for Warwick One Metre telescope.

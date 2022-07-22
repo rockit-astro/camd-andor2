@@ -11,6 +11,7 @@
   "horizontal_shift_index": 2,
   "overscan": [0, 0],
   "filter": "BG40",
+  "header_card_capacity": 144,
   "camera_id": "BLUE",
   "output_path": "/var/tmp/",
   "output_prefix": "blue",

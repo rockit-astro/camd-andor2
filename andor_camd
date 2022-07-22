@@ -62,7 +62,8 @@ class AndorStatus:
 
 
 def process_frames(process_queue, stop_signal, camera_id, filter_name, output_path,
-                   log_name, pipeline_daemon_name, pipeline_handover_timeout):
+                   header_card_capacity, log_name,
+                   pipeline_daemon_name, pipeline_handover_timeout):
     """
     Helper process to save frames to disk.
     This uses a process (rather than a thread) to avoid the GIL stalling frame acquisition
@@ -114,6 +115,11 @@ def process_frames(process_queue, stop_signal, camera_id, filter_name, output_pa
         # Using Card and append() to force comment cards to be placed inline
         for h in header:
             hdu.header.append(fits.Card(h[0], h[1], h[2]), end=True)
+
+        # Pad with sufficient blank cards that pipelined won't need to allocate extra header blocks
+        padding = max(0, header_card_capacity - len(hdu.header) - 1)
+        for _ in range(padding):
+            hdu.header.append(fits.Card(None, None, None), end=True)
 
         # Save errors shouldn't interfere with preview updates, so we use a separate try/catch
         try:
@@ -248,7 +254,7 @@ class CameraDaemon:
 
         processing_process = Process(target=process_frames, args=(
             self._processing_queue, self._processing_stop_signal, config.camera_id, config.filter, config.output_path,
-            config.log_name, config.pipeline_daemon_name, config.pipeline_handover_timeout))
+            config.header_card_capacity, config.log_name, config.pipeline_daemon_name, config.pipeline_handover_timeout))
         processing_process.daemon = True
         processing_process.start()
 

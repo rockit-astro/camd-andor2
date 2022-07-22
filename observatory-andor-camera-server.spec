@@ -1,14 +1,14 @@
 Name:      observatory-andor-camera-server
-Version:   20210913
+Version:   20220722
 Release:   0
 Url:       https://github.com/warwick-one-metre/camd
 Summary:   Control server for Andor CCD cameras.
 License:   GPL-3.0
 Group:     Unspecified
 BuildArch: noarch
-Requires:  python3, python3-Pyro4, python3-numpy, python3-astropy
-Requires:  python3-warwick-observatory-common, python3-warwick-observatory-andor-camera
-Requires:  observatory-log-client, %{?systemd_requires}
+Requires:  python3 python3-Pyro4 python3-numpy python3-astropy
+Requires:  python3-warwick-observatory-common python3-warwick-observatory-andor-camera
+Requires:  observatory-log-client
 # Required for the andor SDK to detect the cameras
 # Under CentOS 8 this requires the powertools repository to be enabled
 Requires: libusb-devel

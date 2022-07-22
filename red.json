@@ -11,6 +11,7 @@
   "horizontal_shift_index": 2,
   "overscan": [20, 20],
   "filter": "Z",
+  "header_card_capacity": 144,
   "camera_id": "RED",
   "output_path": "/var/tmp/",
   "output_prefix": "red",

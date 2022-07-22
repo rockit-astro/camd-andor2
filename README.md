@@ -26,6 +26,7 @@ The configuration options are:
   "horizontal_shift_index": 2, # Default readout speed.
   "overscan": [0, 0], # Number of columns to trim from the left and right of the image.
   "filter": "BG40", # Value to use for the FILTER fits header keyword.
+  "header_card_capacity": 144, # Pad the fits header with blank space to fit at least this many cards without reallocation.
   "camera_id": "BLUE", # Value to use for the CAMERA fits header keyword.
   "output_path": "/var/tmp/", # Path to save temporary output frames before they are handed to the pipeline daemon. This should match the pipeline incoming_data_path setting.
   "output_prefix": "blue", # Filename prefix to use for temporary output frames.
