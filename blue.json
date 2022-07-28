@@ -3,7 +3,7 @@
   "pipeline_daemon": "onemetre_pipeline",
   "pipeline_handover_timeout": 10,
   "log_name": "andor_camd@blue",
-  "control_machines": ["OneMetreDome", "OneMetreTCS"],
+  "control_machines": ["OneMetreDome", "OneMetreTCS", "OneMetreCameras"],
   "camera_serial": 11575,
   "temperature_setpoint": -30,
   "temperature_query_delay": 1,
@@ -13,7 +13,7 @@
   "filter": "BG40",
   "header_card_capacity": 144,
   "camera_id": "BLUE",
-  "output_path": "/var/tmp/",
+  "output_path": "/data/incoming",
   "output_prefix": "blue",
-  "expcount_path": "/var/tmp/blue-counter.json"
+  "expcount_path": "/data/blue-counter.json"
 }

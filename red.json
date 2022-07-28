@@ -3,7 +3,7 @@
   "pipeline_daemon": "onemetre_pipeline",
   "pipeline_handover_timeout": 10,
   "log_name": "andor_camd@red",
-  "control_machines": ["OneMetreDome", "OneMetreTCS"],
+  "control_machines": ["OneMetreDome", "OneMetreTCS", "OneMetreCameras"],
   "camera_serial": 12723,
   "temperature_setpoint": -60,
   "temperature_query_delay": 1,
@@ -13,7 +13,7 @@
   "filter": "Z",
   "header_card_capacity": 144,
   "camera_id": "RED",
-  "output_path": "/var/tmp/",
+  "output_path": "/data/incoming",
   "output_prefix": "red",
-  "expcount_path": "/var/tmp/red-counter.json"
+  "expcount_path": "/data/red-counter.json"
 }
