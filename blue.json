@@ -3,7 +3,7 @@
   "pipeline_daemon": "onemetre_pipeline",
   "pipeline_handover_timeout": 10,
   "log_name": "andor_camd@blue",
-  "control_machines": ["OneMetreDome", "OneMetreTCS", "OneMetreCameras"],
+  "control_machines": ["OneMetreDome", "OneMetreTCS", "OneMetreBlueCamera"],
   "camera_serial": 11575,
   "temperature_setpoint": -30,
   "temperature_query_delay": 1,
