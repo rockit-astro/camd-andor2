@@ -95,11 +95,11 @@ def status(config, *_):
         TFmt.Bold + '{} e/ADU'.format(data['gain_factor']) + TFmt.Clear + ')')
     print('   Readout speed is ' + TFmt.Bold + '{:.2f} MHz'.format(
         data['horizontal_shift_speed_mhz']) + TFmt.Clear)
-    print('   Readout window is {4}({0}, {1}, {2}, {3}) px{5}'.format(
-        data['geometry_x'], data['geometry_y'], data['geometry_width'], data['geometry_height'],
+    print('   Readout window is {4}[{0}:{1},{2}:{3}] px{5}'.format(
+        data['window_region'][0], data['window_region'][1], data['window_region'][2], data['window_region'][3],
         TFmt.Bold, TFmt.Clear))
     print('   Readout binning is {2}{0} x {1} px{3}'.format(
-        data['geometry_bin_x'], data['geometry_bin_y'], TFmt.Bold, TFmt.Clear))
+        data['window_bin'][0], data['window_bin'][1], TFmt.Bold, TFmt.Clear))
 
     exposure_label = TFmt.Bold + '{:.2f} s'.format(data['exposure_time']) + TFmt.Clear
     if data['state'] == CameraStatus.Waiting:
@@ -188,14 +188,20 @@ def set_binning(config, camera_ids, args):
 
 def set_window(config, camera_ids, args):
     """Set the camera readout window"""
+    window = None
     if len(args) == 4:
-        x = int(args[0])
-        y = int(args[1])
-        width = int(args[2])
-        height = int(args[3])
+        window = [
+            int(args[0]),
+            int(args[1]),
+            int(args[2]),
+            int(args[3])
+        ]
+
+    if window or (len(args) == 1 and args[0] == 'default'):
         with config.daemon.connect() as camd:
-            return camd.set_window(x, y, width, height)
-    print('usage: {} [{}] window <x> <y> <width> <height>'.format(SCRIPT_NAME, '|'.join(camera_ids)))
+            return camd.set_window(window)
+
+    print('usage: {} [{}] window (<x1> <x2> <y1> <y2>|default)'.format(SCRIPT_NAME, '|'.join(camera_ids)))
     return -1
 
 
