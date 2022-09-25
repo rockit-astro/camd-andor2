@@ -1,5 +1,5 @@
 Name:           python3-warwick-observatory-andor-camera
-Version:        20220722
+Version:        20220925
 Release:        0
 License:        GPL3
 Summary:        Common code for the Andor camera daemon.
