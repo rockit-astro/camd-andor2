@@ -109,7 +109,7 @@ class Config:
     """Daemon configuration parsed from a json file"""
     def __init__(self, config_filename):
         # Will throw on file not found or invalid json
-        with open(config_filename, 'r') as config_file:
+        with open(config_filename, 'r', encoding='utf-8') as config_file:
             config_json = json.load(config_file)
 
         # Will throw on schema violations
@@ -136,4 +136,3 @@ class Config:
         self.header_card_capacity = config_json['header_card_capacity']
         self.temperature_setpoint = config_json['temperature_setpoint']
         self.temperature_query_delay = config_json['temperature_query_delay']
-

@@ -19,12 +19,7 @@
 # pylint: disable=too-few-public-methods
 # pylint: disable=invalid-name
 
-FMT_GREEN = u'\033[92m'
-FMT_RED = u'\033[91m'
-FMT_CYAN = u'\033[96m'
-FMT_YELLOW = u'\033[93m'
-FMT_BOLD = u'\033[1m'
-FMT_CLEAR = u'\033[0m'
+from warwick.observatory.common import TFmt
 
 class CommandStatus:
     """Numeric return codes"""
@@ -84,7 +79,8 @@ class CommandStatus:
         """Returns a human readable string describing an error code"""
         if error_code in cls._messages:
             return cls._messages[error_code]
-        return 'error: Unknown error code {}'.format(error_code)
+        return f'error: Unknown error code {error_code}'
+
 
 class CameraStatus:
     """Status of the camera hardware"""
@@ -93,34 +89,61 @@ class CameraStatus:
     Disabled, Initializing, Idle, Waiting, Acquiring, Reading, Aborting = range(7)
 
     _labels = {
-        0: FMT_BOLD + FMT_RED + 'OFFLINE' + FMT_CLEAR,
-        1: FMT_BOLD + FMT_RED + 'INITIALIZING' + FMT_CLEAR,
-        2: FMT_BOLD + 'IDLE' + FMT_CLEAR,
-        3: FMT_BOLD + FMT_YELLOW + 'WAITING' + FMT_CLEAR,
-        4: FMT_BOLD + FMT_GREEN + 'EXPOSING' + FMT_CLEAR,
-        5: FMT_BOLD + FMT_YELLOW + 'READING' + FMT_CLEAR,
-        6: FMT_BOLD + FMT_RED + 'ABORTING' + FMT_CLEAR
+        0: 'OFFLINE',
+        1: 'INITIALIZING',
+        2: 'IDLE',
+        3: 'WAITING',
+        4: 'EXPOSING',
+        5: 'READING',
+        6: 'ABORTING'
+    }
+
+    _formats = {
+        0: TFmt.Red,
+        1: TFmt.Red,
+        2: '',
+        3: TFmt.Yellow,
+        4: TFmt.Green,
+        5: TFmt.Yellow,
+        6: TFmt.Red
     }
 
     @classmethod
-    def label(cls, status):
-        """Returns a human readable string describing a status"""
+    def label(cls, status, formatting=False):
+        """
+        Returns a human readable string describing a status
+        Set formatting=true to enable terminal formatting characters
+        """
+        if formatting:
+            if status in cls._formats and status in cls._labels:
+                return TFmt.Bold + cls._formats[status] + cls._labels[status] + TFmt.Clear
+            return TFmt.Red + TFmt.Bold + 'UNKNOWN STATUS' + TFmt.Clear
+
         if status in cls._labels:
             return cls._labels[status]
-        return FMT_RED + FMT_BOLD + 'UNKNOWN STATUS' + FMT_CLEAR
+        return 'UNKNOWN STATUS'
+
 
 class CameraGain:
     """Camera gain levels"""
     High, Medium, Low = range(3)
     _labels = {
-        0: FMT_BOLD + 'HIGH' + FMT_CLEAR,
-        1: FMT_BOLD + 'MEDIUM' + FMT_CLEAR,
-        2: FMT_BOLD + 'LOW' + FMT_CLEAR,
+        0: 'HIGH',
+        1: 'MEDIUM',
+        2: 'LOW',
     }
 
     @classmethod
-    def label(cls, status):
-        """Returns a human readable string describing a gain"""
+    def label(cls, status, formatting=False):
+        """
+        Returns a human readable string describing a gain
+        Set formatting=true to enable terminal formatting characters
+        """
+        if formatting:
+            if status in cls._labels:
+                return TFmt.Bold + cls._labels[status] + TFmt.Clear
+            return TFmt.Red + TFmt.Bold + 'UNKNOWN GAIN' + TFmt.Clear
+
         if status in cls._labels:
             return cls._labels[status]
-        return FMT_RED + FMT_BOLD + 'UNKNOWN GAIN' + FMT_CLEAR
+        return 'UNKNOWN GAIN'

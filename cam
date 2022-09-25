@@ -55,25 +55,24 @@ def status(config, *_):
     with config.daemon.connect() as camd:
         data = camd.report_status()
 
-    state_desc = CameraStatus.label(data['state'])
+    state_desc = CameraStatus.label(data['state'], formatting=True)
     if data['state'] == CameraStatus.Acquiring:
-        progress = '{:.1f} / {:.1f}s'.format(data['exposure_progress'], data['exposure_time'])
-        state_desc += ' (' + TFmt.Bold + progress + TFmt.Clear + ')'
+        state_desc += f' ({TFmt.Bold}{data["exposure_progress"]:.1f} / {data["exposure_time"]:.1f}s{TFmt.Clear})'
     elif data['state'] == CameraStatus.Waiting:
-        progress = '{:.1f} / {:.1f}s'.format(data['delay_progress'], data['delay_time'])
-        state_desc += ' (' + TFmt.Bold + progress + TFmt.Clear + ')'
+        state_desc += f' ({TFmt.Bold}{data["delay_progress"]:.1f} / {data["delay_total"]:.1f}s{TFmt.Clear})'
 
     # Camera is disabled
-    print('   Camera is {}'.format(state_desc))
+    print(f'   Camera is {state_desc}')
     if data['state'] == CameraStatus.Disabled:
         return 0
 
     if data['state'] > CameraStatus.Idle:
         if data['sequence_frame_limit'] > 0:
-            print('   Acquiring frame ' + TFmt.Bold + str(data['sequence_frame_count'] + 1) + \
-                  ' / ' + str(data['sequence_frame_limit']) + TFmt.Clear)
+            count = data['sequence_frame_count'] + 1
+            limit = data['sequence_frame_limit']
+            print(f'   Acquiring frame {TFmt.Bold}{count} / {limit}{TFmt.Clear}')
         else:
-            print('   Acquiring ' + TFmt.Bold + 'UNTIL STOPPED' + TFmt.Clear)
+            print(f'   Acquiring {TFmt.Bold}UNTIL STOPPED{TFmt.Clear}')
 
     temperature_fmt = TFmt.Bold + TFmt.Red
     if data['temperature_locked']:
@@ -83,30 +82,21 @@ def status(config, *_):
         temperature_status = TFmt.Bold + TFmt.Red + 'COOLING DISABLED' + TFmt.Clear
         temperature_fmt = TFmt.Bold
     else:
-        temperature_status = TFmt.Bold + 'LOCKING ON {:.0f}\u00B0C'.format(
-            data['target_temperature']) + TFmt.Clear
+        temperature_status = f'{TFmt.Bold}LOCKING ON {data["target_temperature"]:.0f}\u00B0C{TFmt.Clear}'
 
-    print('   Temperature is ' + temperature_fmt + '{:.0f}'.format(data['temperature']) + \
-          '\u00B0C' + TFmt.Clear + ' (' + temperature_status + ')')
+    print(f'   Temperature is {temperature_fmt}{data["temperature"]:.0f}\u00B0C{TFmt.Clear} ({temperature_status})')
 
     shutter_mode = TFmt.Green + 'AUTO' if data['shutter_enabled'] else TFmt.Red + 'DARK'
     print('   Shutter mode is ' + TFmt.Bold + shutter_mode + TFmt.Clear)
-    print('   Pre-amp gain is ' + CameraGain.label(data['gain_index']) + ' (' + \
-        TFmt.Bold + '{} e/ADU'.format(data['gain_factor']) + TFmt.Clear + ')')
-    print('   Readout speed is ' + TFmt.Bold + '{:.2f} MHz'.format(
-        data['horizontal_shift_speed_mhz']) + TFmt.Clear)
-    print('   Readout window is {4}[{0}:{1},{2}:{3}] px{5}'.format(
-        data['window_region'][0], data['window_region'][1], data['window_region'][2], data['window_region'][3],
-        TFmt.Bold, TFmt.Clear))
-    print('   Readout binning is {2}{0} x {1} px{3}'.format(
-        data['window_bin'][0], data['window_bin'][1], TFmt.Bold, TFmt.Clear))
+    print('   Pre-amp gain is ' + CameraGain.label(data['gain_index'], formatting=True) +
+          f' ({TFmt.Bold}{data["gain_factor"]} e/ADU{TFmt.Clear}')
+    print(f'   Readout speed is {TFmt.Bold}{data["horizontal_shift_speed_mhz"]:.2f} MHz{TFmt.Clear}')
 
-    exposure_label = TFmt.Bold + '{:.2f} s'.format(data['exposure_time']) + TFmt.Clear
-    if data['state'] == CameraStatus.Waiting:
-        exposure_label += ' (with ' + TFmt.Bold + '{:.2f} s'.format(data['delay_time']) + TFmt.Clear
-        exposure_label += ' delay)'
-
-    print('   Exposure time is ' + exposure_label)
+    wr = data['window_region']
+    wb = data['window_bin']
+    print(f'   Readout window is {TFmt.Bold}[{wr[0]}:{wr[1]},{wr[2]}:{wr[3]}] px{TFmt.Clear}')
+    print(f'   Readout binning is {TFmt.Bold}{wb[0]} x {wb[1]} px{TFmt.Clear}')
+    print(f'   Exposure time is {TFmt.Bold}{data["exposure_time"]:.2f} s{TFmt.Clear}')
     return 0
 
 
@@ -119,7 +109,7 @@ def set_temperature(config, camera_ids, args):
             temp = int(args[0])
         with config.daemon.connect() as camd:
             return camd.set_target_temperature(temp)
-    print('usage: {} [{}] temperature <degrees>'.format(SCRIPT_NAME, '|'.join(camera_ids)))
+    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] temperature <degrees>')
     return -1
 
 
@@ -129,7 +119,7 @@ def set_exposure(config, camera_ids, args):
         exposure = float(args[0])
         with config.daemon.connect() as camd:
             return camd.set_exposure(exposure)
-    print('usage: {} [{}] exposure <seconds>'.format(SCRIPT_NAME, '|'.join(camera_ids)))
+    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] exposure <seconds>')
     return -1
 
 
@@ -139,7 +129,7 @@ def set_exposure_delay(config, camera_ids, args):
         delay = float(args[0])
         with config.daemon.connect() as camd:
             return camd.set_exposure_delay(delay)
-    print('usage: {} [{}] delay <seconds>'.format(SCRIPT_NAME, '|'.join(camera_ids)))
+    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] delay <seconds>')
     return -1
 
 
@@ -149,7 +139,7 @@ def set_gain(config, camera_ids, args):
         index = 0 if args[0] == 'high' else 1 if args[0] == 'medium' else 2
         with config.daemon.connect() as camd:
             return camd.set_gain(index)
-    print('usage: {} [{}] gain [high|medium|low]'.format(SCRIPT_NAME, '|'.join(camera_ids)))
+    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] gain [high|medium|low]')
     return -1
 
 
@@ -160,8 +150,7 @@ def set_horizontal_shift_speed(config, camera_ids, args):
         index = options.index(args[0])
         with config.daemon.connect() as camd:
             return camd.set_horizontal_shift(index)
-    print('usage: {} [blue|red] readout [a|b|c|d]'.format(SCRIPT_NAME))
-    print('usage: {} [{}] readout [a|b|c|d]'.format(SCRIPT_NAME, '|'.join(camera_ids)))
+    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] readout [a|b|c|d]')
     return -1
 
 
@@ -171,7 +160,7 @@ def set_shutter(config, camera_ids, args):
         enabled = args[0] == 'auto'
         with config.daemon.connect() as camd:
             return camd.set_shutter(enabled)
-    print('usage: {} [{}] shutter [auto|dark]'.format(SCRIPT_NAME, '|'.join(camera_ids)))
+    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] shutter [auto|dark]')
     return -1
 
 
@@ -182,7 +171,7 @@ def set_binning(config, camera_ids, args):
         binning = int(args[0])
         with config.daemon.connect() as camd:
             return camd.set_binning(binning, binning)
-    print('usage: {} [{}] bin <pixel size>'.format(SCRIPT_NAME, '|'.join(camera_ids)))
+    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] bin <pixel size>')
     return -1
 
 
@@ -201,7 +190,7 @@ def set_window(config, camera_ids, args):
         with config.daemon.connect() as camd:
             return camd.set_window(window)
 
-    print('usage: {} [{}] window (<x1> <x2> <y1> <y2>|default)'.format(SCRIPT_NAME, '|'.join(camera_ids)))
+    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] window (<x1> <x2> <y1> <y2>|default)')
     return -1
 
 
@@ -210,13 +199,15 @@ def start(config, camera_ids, args):
     if len(args) == 1:
         try:
             count = 0 if args[0] == 'continuous' else int(args[0])
-            if args[0] == 'continuous' or count > 0:
-                with config.daemon.connect() as camd:
-                    return camd.start_sequence(count)
         except Exception:
             print('error: invalid exposure count:', args[0])
             return -1
-    print('usage: {} [{}] start (continuous|<count>)'.format(SCRIPT_NAME, '|'.join(camera_ids)))
+
+        if args[0] == 'continuous' or count > 0:
+            with config.daemon.connect() as camd:
+                return camd.start_sequence(count)
+
+    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] start (continuous|<count>)')
     return -1
 
 
@@ -241,7 +232,7 @@ def shutdown(config, *_):
 
 def print_usage(config_paths):
     """Prints the utility help"""
-    print('usage: {} [{}] <command> [<args>]'.format(SCRIPT_NAME, '|'.join(sorted(config_paths.keys()))))
+    print(f'usage: {SCRIPT_NAME} [{"|".join(sorted(config_paths.keys()))}] <command> [<args>]')
     print()
     print('general commands:')
     print('   status       print a human-readable summary of the camera status')
