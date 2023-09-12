@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 #
 # This file is part of the Robotic Observatory Control Kit (rockit)
 #
@@ -15,24 +14,53 @@
 # You should have received a copy of the GNU General Public License
 # along with rockit.  If not, see <http://www.gnu.org/licenses/>.
 
-"""Daemon process for managing one of the cameras"""
+"""client command input handlers"""
 
-import glob
-import os
-import sys
 import Pyro4
 from rockit.common import TFmt
-from rockit.camera.andor2 import Config, CommandStatus, CameraStatus, CameraGain
-
-SCRIPT_NAME = os.path.basename(sys.argv[0])
-sys.excepthook = Pyro4.util.excepthook
+from .config import Config
+from .constants import CommandStatus, CameraGain, CameraStatus
 
 
-def run_command(config_paths, camera_id, command, args):
+def run_client_command(config_path, usage_prefix, args):
     """Prints the message associated with a status code and returns the code"""
-    config = Config(config_paths[camera_id])
+    config = Config(config_path)
+    commands = {
+        'bin': set_binning,
+        'delay': set_exposure_delay,
+        'exposure': set_exposure,
+        'gain': set_gain,
+        'readout': set_horizontal_shift_speed,
+        'shutter': set_shutter,
+        'start': start,
+        'status': status,
+        'stop': stop,
+        'temperature': set_temperature,
+        'window': set_window,
+        'init': initialize,
+        'kill': shutdown
+    }
+
+    if len(args) == 0 or (args[0] not in commands and args[0] != 'completion'):
+        return print_usage(usage_prefix)
+
+    if args[0] == 'completion':
+        if 'gain' in args[-2:]:
+            print('high medium low')
+        elif 'readout' in args[-2:]:
+            print('a b c d')
+        elif 'shutter' in args[-2:]:
+            print('auto dark')
+        elif 'start' in args[-2:]:
+            print('continuous')
+        elif 'temperature' in args[-2:]:
+            print('warm')
+        elif len(args) < 3:
+            print(' '.join(commands))
+        return 0
+
     try:
-        ret = command(config, sorted(config_paths.keys()), args)
+        ret = commands[args[0]](config, usage_prefix, args[1:])
     except KeyboardInterrupt:
         # ctrl-c terminates the running command
         ret = stop(config, args)
@@ -100,7 +128,7 @@ def status(config, *_):
     return 0
 
 
-def set_temperature(config, camera_ids, args):
+def set_temperature(config, usage_prefix, args):
     """Set the camera temperature"""
     if len(args) == 1:
         if args[0] == 'warm':
@@ -109,73 +137,73 @@ def set_temperature(config, camera_ids, args):
             temp = int(args[0])
         with config.daemon.connect() as camd:
             return camd.set_target_temperature(temp)
-    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] temperature <degrees>')
+    print(f'usage: {usage_prefix} temperature <degrees>')
     return -1
 
 
-def set_exposure(config, camera_ids, args):
+def set_exposure(config, usage_prefix, args):
     """Set the camera exposure time"""
     if len(args) == 1:
         exposure = float(args[0])
         with config.daemon.connect() as camd:
             return camd.set_exposure(exposure)
-    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] exposure <seconds>')
+    print(f'usage: {usage_prefix} exposure <seconds>')
     return -1
 
 
-def set_exposure_delay(config, camera_ids, args):
+def set_exposure_delay(config, usage_prefix, args):
     """Set the camera pre-exposure delay"""
     if len(args) == 1:
         delay = float(args[0])
         with config.daemon.connect() as camd:
             return camd.set_exposure_delay(delay)
-    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] delay <seconds>')
+    print(f'usage: {usage_prefix} delay <seconds>')
     return -1
 
 
-def set_gain(config, camera_ids, args):
+def set_gain(config, usage_prefix, args):
     """Set the camera gain"""
     if len(args) == 1 and (args[0] == 'high' or args[0] == 'medium' or args[0] == 'low'):
         index = 0 if args[0] == 'high' else 1 if args[0] == 'medium' else 2
         with config.daemon.connect() as camd:
             return camd.set_gain(index)
-    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] gain [high|medium|low]')
+    print(f'usage: {usage_prefix} gain [high|medium|low]')
     return -1
 
 
-def set_horizontal_shift_speed(config, camera_ids, args):
+def set_horizontal_shift_speed(config, usage_prefix, args):
     """Set the readout / horizontal shift speed"""
     options = ['a', 'b', 'c', 'd']
     if len(args) == 1 and args[0] in options:
         index = options.index(args[0])
         with config.daemon.connect() as camd:
             return camd.set_horizontal_shift(index)
-    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] readout [a|b|c|d]')
+    print(f'usage: {usage_prefix} readout [a|b|c|d]')
     return -1
 
 
-def set_shutter(config, camera_ids, args):
+def set_shutter(config, usage_prefix, args):
     """Set the camera shutter mode"""
     if len(args) == 1 and (args[0] == 'auto' or args[0] == 'dark'):
         enabled = args[0] == 'auto'
         with config.daemon.connect() as camd:
             return camd.set_shutter(enabled)
-    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] shutter [auto|dark]')
+    print(f'usage: {usage_prefix} shutter [auto|dark]')
     return -1
 
 
-def set_binning(config, camera_ids, args):
+def set_binning(config, usage_prefix, args):
     """Set the camera binning"""
     if len(args) == 1:
         # Assume square pixels
         binning = int(args[0])
         with config.daemon.connect() as camd:
             return camd.set_binning(binning, binning)
-    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] bin <pixel size>')
+    print(f'usage: {usage_prefix} bin <pixel size>')
     return -1
 
 
-def set_window(config, camera_ids, args):
+def set_window(config, usage_prefix, args):
     """Set the camera readout window"""
     window = None
     if len(args) == 4:
@@ -190,11 +218,11 @@ def set_window(config, camera_ids, args):
         with config.daemon.connect() as camd:
             return camd.set_window(window)
 
-    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] window (<x1> <x2> <y1> <y2>|default)')
+    print(f'usage: {usage_prefix} window (<x1> <x2> <y1> <y2>|default)')
     return -1
 
 
-def start(config, camera_ids, args):
+def start(config, usage_prefix, args):
     """Starts an exposure sequence"""
     if len(args) == 1:
         try:
@@ -207,7 +235,7 @@ def start(config, camera_ids, args):
             with config.daemon.connect() as camd:
                 return camd.start_sequence(count)
 
-    print(f'usage: {SCRIPT_NAME} [{"|".join(camera_ids)}] start (continuous|<count>)')
+    print(f'usage: {usage_prefix} start (continuous|<count>)')
     return -1
 
 
@@ -230,9 +258,9 @@ def shutdown(config, *_):
         return camd.shutdown()
 
 
-def print_usage(config_paths):
+def print_usage(usage_prefix):
     """Prints the utility help"""
-    print(f'usage: {SCRIPT_NAME} [{"|".join(sorted(config_paths.keys()))}] <command> [<args>]')
+    print(f'usage: {usage_prefix} <command> [<args>]')
     print()
     print('general commands:')
     print('   status       print a human-readable summary of the camera status')
@@ -252,45 +280,3 @@ def print_usage(config_paths):
     print()
 
     return 0
-
-
-if __name__ == '__main__':
-    if 'CAMD_CONFIG_ROOT' in os.environ:
-        config_root = os.environ['CAMD_CONFIG_ROOT']
-    else:
-        config_root = '/etc/camd'
-
-    configs = {os.path.basename(p)[:-5]: p for p in glob.glob(os.path.join(config_root, '*.json'))}
-    if not configs:
-        print('error: no camera configs were found in ' + config_root)
-        print('       run as CAMD_CONFIG_ROOT=/path/to/config/root ' + ' '.join(sys.argv))
-        print('       to specify the configuration root directory')
-        sys.exit(1)
-
-    if len(sys.argv) == 2 and sys.argv[1] == 'list-cameras':
-        print(' '.join(sorted(configs.keys())))
-        sys.exit(0)
-
-    if len(sys.argv) < 3:
-        sys.exit(print_usage(configs))
-
-    commands = {
-        'status': status,
-        'temperature': set_temperature,
-        'exposure': set_exposure,
-        'delay': set_exposure_delay,
-        'gain': set_gain,
-        'readout': set_horizontal_shift_speed,
-        'shutter': set_shutter,
-        'bin': set_binning,
-        'window': set_window,
-        'start': start,
-        'stop': stop,
-        'init': initialize,
-        'kill': shutdown
-    }
-
-    if sys.argv[1] not in configs or sys.argv[2] not in commands:
-        sys.exit(print_usage(configs))
-
-    sys.exit(run_command(configs, sys.argv[1], commands[sys.argv[2]], sys.argv[3:]))

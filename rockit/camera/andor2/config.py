@@ -1,33 +1,34 @@
 #
-# This file is part of camd
+# This file is part of the Robotic Observatory Control Kit (rockit)
 #
-# camd is free software: you can redistribute it and/or modify
+# rockit is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# camd is distributed in the hope that it will be useful,
+# rockit is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with camd.  If not, see <http://www.gnu.org/licenses/>.
+# along with rockit.  If not, see <http://www.gnu.org/licenses/>.
 
 """Helper function to validate and parse the json config file"""
 
 # pylint: disable=too-many-instance-attributes
 
 import json
-from warwick.observatory.common import daemons, IP, validation
+from rockit.common import daemons, IP, validation
 
 CONFIG_SCHEMA = {
     'type': 'object',
     'additionalProperties': False,
     'required': [
-        'daemon', 'pipeline_daemon', 'pipeline_handover_timeout', 'log_name', 'control_machines', 'camera_serial',
-        'camera_id', 'temperature_setpoint', 'temperature_query_delay', 'gain_index', 'horizontal_shift_index',
-        'overscan', 'filter', 'header_card_capacity', 'output_path', 'output_prefix', 'expcount_path'
+        'daemon', 'pipeline_daemon', 'pipeline_handover_timeout', 'log_name', 'control_machines',
+        'client_commands_module', 'camera_serial', 'camera_id', 'temperature_setpoint', 'temperature_query_delay',
+        'gain_index', 'horizontal_shift_index', 'overscan', 'filter', 'header_card_capacity', 'output_path',
+        'output_prefix', 'expcount_path'
     ],
     'properties': {
         'daemon': {
@@ -51,6 +52,9 @@ CONFIG_SCHEMA = {
                 'type': 'string',
                 'machine_name': True
             }
+        },
+        'client_commands_module': {
+            'type': 'string'
         },
         'camera_serial': {
             'type': 'integer'
@@ -104,6 +108,7 @@ CONFIG_SCHEMA = {
         }
     }
 }
+
 
 class Config:
     """Daemon configuration parsed from a json file"""

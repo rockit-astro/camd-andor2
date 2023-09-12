@@ -4,17 +4,23 @@ RPMBUILD = rpmbuild --define "_topdir %(pwd)/build" \
         --define "_srcrpmdir %{_topdir}" \
         --define "_sourcedir %(pwd)"
 
-GIT_VERSION = $(shell git name-rev --name-only --tags --no-undefined HEAD 2>/dev/null || echo git-`git rev-parse --short HEAD`)
-SERVER_VERSION=$(shell awk '/Version:/ { print $$2; }' observatory-andor-camera-server.spec)
-
 all:
 	mkdir -p build
-	cp andor_camd andor_camd.bak
-	awk '{sub("SOFTWARE_VERSION = .*$$","SOFTWARE_VERSION = \"$(SERVER_VERSION) ($(GIT_VERSION))\""); print $0}' andor_camd.bak > andor_camd
-	${RPMBUILD} -ba observatory-andor-camera-server.spec
-	${RPMBUILD} -ba observatory-andor-camera-client.spec
-	${RPMBUILD} -ba python3-warwick-observatory-andor-camera.spec
-	${RPMBUILD} -ba onemetre-andor-camera-data.spec
+	date --utc +%Y%m%d%H%M%S > VERSION
+	${RPMBUILD} --define "_version %(cat VERSION)" -ba rockit-camera-andor2.spec
+	${RPMBUILD} --define "_version %(cat VERSION)" -ba python3-rockit-camera-andor2.spec
+
 	mv build/noarch/*.rpm .
-	rm -rf build
-	mv andor_camd.bak andor_camd
+	rm -rf build VERSION
+
+install:
+	@date --utc +%Y%m%d%H%M%S > VERSION
+	@python3 -m build --outdir .
+	@sudo pip3 install rockit.camera.andor2-$$(cat VERSION)-py3-none-any.whl
+	@rm VERSION
+	@sudo cp andor2_camd /bin/
+	@sudo cp andor2_camd@.service /usr/lib/systemd/system/
+	@sudo install -d /etc/camd
+	@echo ""
+	@echo "Installed server and service files."
+	@echo "Now copy the relevant json config files to /etc/camd/"

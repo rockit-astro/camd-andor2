@@ -2,9 +2,7 @@
 
 `andor_camd` interfaces with and wraps Andor USB CCD cameras and exposes them via Pyro.
 
-`cam` is a commandline utility for controlling the cameras.
-
-See [Software Infrastructure](https://github.com/warwick-one-metre/docs/wiki/Software-Infrastructure) for an overview of the observatory software architecture and instructions for developing and deploying the code.
+The `cam` commandline utility for controlling the cameras is provided by [camd-client](https://github.com/rockit-astro/camd-client/).
 
 ### Configuration
 
@@ -14,11 +12,12 @@ A configuration file is specified when launching the camera server, and the `cam
 The configuration options are:
 ```python
 {
-  "daemon": "onemetre_blue_camera", # Run the camera server as this daemon. Daemon types are registered in `warwick.observatory.common.daemons`.
+  "daemon": "onemetre_blue_camera", # Run the camera server as this daemon. Daemon types are registered in `rockit.common.daemons`.
   "pipeline_daemon": "onemetre_pipeline", # The daemon that should be notified to hand over newly saved frames for processing.
   "pipeline_handover_timeout": 10, # The maximum amount of time to wait for the pipeline daemon to accept a newly saved frame. The exposure sequence is aborted if this is exceeded.
   "log_name": "andor_camd@blue", # The name to use when writing messages to the observatory log.
-  "control_machines": ["OneMetreDome", "OneMetreTCS"], # Machine names that are allowed to control (rather than just query) state. Machine names are registered in `warwick.observatory.common.IP`.
+  "control_machines": ["OneMetreDome", "OneMetreTCS"], # Machine names that are allowed to control (rather than just query) state. Machine names are registered in `rockit.common.IP`.
+  "client_commands_module": "rockit.camera.andor2",
   "camera_serial": 11575, # Camera serial number. If not known, set a dummy value and look at the list reported when the daemon scans for cameras.
   "temperature_setpoint": -30, # Default CCD temperature in celsius.
   "temperature_query_delay": 1, # Amount of time in seconds to wait between querying the camera temperature and cooling status.
@@ -36,31 +35,24 @@ The configuration options are:
 
 ### Initial Installation
 
-The Andor SDK is required for `observatory-andor-camera-server`, and must be installed separately.
+The Andor SDK is required for `rockit-camera-andor-server`, and must be installed separately.
 Download the latest SDK version from the [Docs repository](https://github.com/warwick-one-metre/docs/tree/master/andor/sdk), extract it, and then install using:
 ```
 sudo ./install_andor
 ```
 Select option 5 (All USB Cameras).
 
-Under CentOS 8 the `libusb-devel` package required for the andor library to find cameras (note: `libusbx-devel` doesn't work) is available through the PowerTools repository
-```
-sudo yum config-manager --set-enabled PowerTools
-```
-
 The automated packaging scripts will push 4 RPM packages to the observatory package repository:
 
-| Package           | Description |
-| ----------------- | ------ |
-| onemetre-andor-camera-data  | Contains the json configuration files for the Warwick One Metre dual-camera instrument. |
-| observatory-andor-camera-server | Contains the `andor_camd` server and systemd service files for the camera server. |
-| observatory-andor-camera-client | Contains the `cam` commandline utility for controlling the camera server. |
-| python3-warwick-andor-camera | Contains the python module with shared code. |
+| Package                          | Description                                                                             |
+|----------------------------------|-----------------------------------------------------------------------------------------|
+| onemetre-andor-camera-data       | Contains the json configuration files for the Warwick One Metre dual-camera instrument. |
+| observatory-andor-camera-server  | Contains the `andor_camd` server and systemd service files for the camera server.       |
+| python3-warwick-andor-camera     | Contains the python module with shared code.                                            |
 
-The `observatory-andor-camera-server observatory-andor-camera-client onemetre-andor-camera-data` packages should be installed on the `onemetre-tcs` machine, then the systemd service should be enabled:
+After installing the server package, the systemd service should be enabled:
 ```
-sudo systemctl enable andor_camd@<config>
-sudo systemctl start andor_camd@<config>
+sudo systemctl enable --now andor2_camd@<config>
 ```
 
 where `config` is `blue` then `red` for the two cameras.
@@ -71,9 +63,7 @@ sudo firewall-cmd --zone=public --add-port=<port>/tcp --permanent
 sudo firewall-cmd --reload
 ```
 
-where `port` is the port defined in `warwick.observatory.common.daemons` for the daemon specified in the camera config.
-
-The `observatory-andor-camera-client` and `onemetre-andor-camera-config` can be installed on both the TCS and dome machines for centralized control.
+where `port` is the port defined in `rockit.common.daemons` for the daemon specified in the camera config.
 
 ### Upgrading Installation
 
@@ -86,14 +76,13 @@ sudo yum update
 
 The daemon should then be restarted to use the newly installed code:
 ```
-sudo systemctl stop andor_camd@<config>
-sudo systemctl start andor_camd@<config>
+sudo systemctl restart andor2_camd@<config>
 ```
 
 ### Testing Locally
 
 The camera server and client can be run directly from a git clone:
 ```
-./andor_camd test.json
+./andor2_camd blue.json
 CAMD_CONFIG_ROOT=. ./cam blue status
 ```
