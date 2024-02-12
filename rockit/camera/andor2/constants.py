@@ -123,28 +123,3 @@ class CameraStatus:
         if status in cls._labels:
             return cls._labels[status]
         return 'UNKNOWN STATUS'
-
-
-class CameraGain:
-    """Camera gain levels"""
-    High, Medium, Low = range(3)
-    _labels = {
-        0: 'HIGH',
-        1: 'MEDIUM',
-        2: 'LOW',
-    }
-
-    @classmethod
-    def label(cls, status, formatting=False):
-        """
-        Returns a human readable string describing a gain
-        Set formatting=true to enable terminal formatting characters
-        """
-        if formatting:
-            if status in cls._labels:
-                return TFmt.Bold + cls._labels[status] + TFmt.Clear
-            return TFmt.Red + TFmt.Bold + 'UNKNOWN GAIN' + TFmt.Clear
-
-        if status in cls._labels:
-            return cls._labels[status]
-        return 'UNKNOWN GAIN'

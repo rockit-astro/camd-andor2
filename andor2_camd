@@ -97,7 +97,7 @@ def process_frames(process_queue, stop_signal, camera_id, filter_name, output_pa
             ('CAM-XBIN', frame['window_bin'][0], '[px] x binning'),
             ('CAM-YBIN', frame['window_bin'][1], '[px] y binning'),
             ('CAM-WIND', f'[{w[0]}:{w[1]},{w[2]}:{w[3]}]', '[x1:x2,y1:y2] readout region (detector coords)'),
-            ('CAM-GAIN', frame['gain'], '[e-/DN] nominal readout gain'),
+            ('CAM-GAIN', frame['gain'], 'preamplifier gain setting'),
             ('CAM-RSPD', frame['horizontal_shift_speed'], '[MHz] CCD readout speed'),
             ('SHUTTER', 'AUTO' if frame['shutter_enabled'] else 'CLOSED', 'shutter mode'),
             image_region_header,
@@ -179,7 +179,7 @@ class CameraDaemon:
         # Shutter enabled (opens during exposures), or remains closed
         self._shutter_enabled = False
 
-        # Gain index. For blue camera: 0 = 1x, 1 = 2x, 2 = 4x
+        # Gain index.
         self._gains = []
         self._gain_index = config.gain_index
         self._exposure_time = 1
@@ -321,6 +321,25 @@ class CameraDaemon:
                 self._horizontal_shift_speed_index = shift_speed_index
             else:
                 print(f'failed to set horizontal shift {shift_speed_index} with status {status}')
+
+            # Update gain values for new shift speed
+            gain_count = c_int(0)
+            status = self._driver.GetNumberPreAmpGains(byref(gain_count))
+            if status != AndorStatus.Success:
+                print(f'failed to query gain count with status {status}')
+                return CommandStatus.Failed
+
+            gains = []
+            gain = create_string_buffer(30)
+            for i in range(gain_count.value):
+                status = self._driver.GetPreAmpGainText(c_int(i), gain, 30)
+                if status != AndorStatus.Success:
+                    print(f'failed to query gain for index {i} with status {status}')
+                    return CommandStatus.Failed
+                gains.append(gain.value.decode('ascii'))
+
+            self._gains = gains
+
         return status
 
     def __set_exposure_time(self, exposure_seconds):
@@ -463,7 +482,6 @@ class CameraDaemon:
         data = {'state': self._status}
         if self._status != CameraStatus.Disabled:
             shift_mhz = self._horizontal_shift_speeds[self._horizontal_shift_speed_index]
-            gain_factor = self._gains[self._gain_index]
 
             # Estimate the current frame progress based on the time delta
             exposure_progress = 0
@@ -491,7 +509,7 @@ class CameraDaemon:
                 'delay_progress': delay_progress,
                 'delay_total': self._exposure_delay,
                 'gain_index': self._gain_index,
-                'gain_factor': gain_factor,
+                'gain_label': self._gains[self._gain_index],
                 'horizontal_shift_speed_index': self._horizontal_shift_speed_index,
                 'horizontal_shift_speed_mhz': shift_mhz,
                 'window_bin': self._window_bin,
@@ -612,28 +630,6 @@ class CameraDaemon:
                     print(f'failed to set default exposure time with status {status}')
                     return CommandStatus.Failed
 
-                # Query gains
-                gain_count = c_int(0)
-                status = driver.GetNumberPreAmpGains(byref(gain_count))
-                if status != AndorStatus.Success:
-                    print(f'failed to query gain count with status {status}')
-                    return CommandStatus.Failed
-
-                gains = []
-                gain = c_float(0)
-                for i in range(gain_count.value):
-                    status = driver.GetPreAmpGain(c_int(i), byref(gain))
-                    if status != AndorStatus.Success:
-                        print(f'failed to query gain for index {i} with status {status}')
-                        return CommandStatus.Failed
-                    gains.append(gain.value)
-
-                # Set default gain index
-                status = driver.SetPreAmpGain(c_int(self._gain_index))
-                if status != AndorStatus.Success:
-                    print(f'failed to set default gain index with status {status}')
-                    return CommandStatus.Failed
-
                 # Query horizontal shift speeds
                 # Assumes that there is only one readout channel, and no electron multiplication
                 shift_count = c_int(0)
@@ -655,6 +651,28 @@ class CameraDaemon:
                 status = driver.SetHSSpeed(c_int(0), c_int(self._horizontal_shift_speed_index))
                 if status != AndorStatus.Success:
                     print(f'failed to set default horizontal shift speed index with status {status}')
+                    return CommandStatus.Failed
+
+                # Query gains
+                gain_count = c_int(0)
+                status = driver.GetNumberPreAmpGains(byref(gain_count))
+                if status != AndorStatus.Success:
+                    print(f'failed to query gain count with status {status}')
+                    return CommandStatus.Failed
+
+                gains = []
+                gain = create_string_buffer(30)
+                for i in range(gain_count.value):
+                    status = driver.GetPreAmpGainText(c_int(i), gain, 30)
+                    if status != AndorStatus.Success:
+                        print(f'failed to query gain for index {i} with status {status}')
+                        return CommandStatus.Failed
+                    gains.append(gain.value.decode('ascii'))
+
+                # Set default gain index
+                status = driver.SetPreAmpGain(c_int(self._gain_index))
+                if status != AndorStatus.Success:
+                    print(f'failed to set default gain index with status {status}')
                     return CommandStatus.Failed
 
                 # Set default readout geometry

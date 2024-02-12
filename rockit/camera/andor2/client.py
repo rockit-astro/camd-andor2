@@ -19,7 +19,7 @@
 import Pyro4
 from rockit.common import TFmt
 from .config import Config
-from .constants import CommandStatus, CameraGain, CameraStatus
+from .constants import CommandStatus, CameraStatus
 
 
 def run_client_command(config_path, usage_prefix, args):
@@ -116,8 +116,7 @@ def status(config, *_):
 
     shutter_mode = TFmt.Green + 'AUTO' if data['shutter_enabled'] else TFmt.Red + 'DARK'
     print('   Shutter mode is ' + TFmt.Bold + shutter_mode + TFmt.Clear)
-    print('   Pre-amp gain is ' + CameraGain.label(data['gain_index'], formatting=True) +
-          f' ({TFmt.Bold}{data["gain_factor"]} e/ADU{TFmt.Clear}')
+    print('   Pre-amp gain is ' + TFmt.Bold + data['gain_label'] + TFmt.Clear)
     print(f'   Readout speed is {TFmt.Bold}{data["horizontal_shift_speed_mhz"]:.2f} MHz{TFmt.Clear}')
 
     wr = data['window_region']
@@ -163,11 +162,11 @@ def set_exposure_delay(config, usage_prefix, args):
 
 def set_gain(config, usage_prefix, args):
     """Set the camera gain"""
-    if len(args) == 1 and (args[0] == 'high' or args[0] == 'medium' or args[0] == 'low'):
-        index = 0 if args[0] == 'high' else 1 if args[0] == 'medium' else 2
+    gains = ['low', 'medium', 'high']
+    if len(args) == 1 and args[0] in gains:
         with config.daemon.connect() as camd:
-            return camd.set_gain(index)
-    print(f'usage: {usage_prefix} gain [high|medium|low]')
+            return camd.set_gain(gains.index(args[0]))
+    print(f'usage: {usage_prefix} gain [low|medium|high]')
     return -1
 
 

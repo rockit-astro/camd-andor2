@@ -18,4 +18,4 @@
 
 from .client import run_client_command
 from .config import Config
-from .constants import CommandStatus, CameraStatus, CameraGain
+from .constants import CommandStatus, CameraStatus
