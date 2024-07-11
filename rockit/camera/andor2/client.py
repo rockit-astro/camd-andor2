@@ -17,7 +17,7 @@
 """client command input handlers"""
 
 import Pyro4
-from rockit.common import TFmt
+from rockit.common import print
 from .config import Config
 from .constants import CommandStatus, CameraStatus
 
@@ -85,9 +85,9 @@ def status(config, *_):
 
     state_desc = CameraStatus.label(data['state'], formatting=True)
     if data['state'] == CameraStatus.Acquiring:
-        state_desc += f' ({TFmt.Bold}{data["exposure_progress"]:.1f} / {data["exposure_time"]:.1f}s{TFmt.Clear})'
+        state_desc += f' ([b]{data["exposure_progress"]:.1f} / {data["exposure_time"]:.1f}s[/b])'
     elif data['state'] == CameraStatus.Waiting:
-        state_desc += f' ({TFmt.Bold}{data["delay_progress"]:.1f} / {data["delay_total"]:.1f}s{TFmt.Clear})'
+        state_desc += f' ([b]{data["delay_progress"]:.1f} / {data["delay_total"]:.1f}s[/b])'
 
     # Camera is disabled
     print(f'   Camera is {state_desc}')
@@ -98,32 +98,32 @@ def status(config, *_):
         if data['sequence_frame_limit'] > 0:
             count = data['sequence_frame_count'] + 1
             limit = data['sequence_frame_limit']
-            print(f'   Acquiring frame {TFmt.Bold}{count} / {limit}{TFmt.Clear}')
+            print(f'   Acquiring frame [b]{count} / {limit}[/b]')
         else:
-            print(f'   Acquiring {TFmt.Bold}UNTIL STOPPED{TFmt.Clear}')
+            print(f'   Acquiring [b]UNTIL STOPPED[/b]')
 
-    temperature_fmt = TFmt.Bold + TFmt.Red
+    temperature_color = 'red'
     if data['temperature_locked']:
-        temperature_status = TFmt.Bold + TFmt.Green + 'LOCKED' + TFmt.Clear
-        temperature_fmt = TFmt.Bold + TFmt.Green
+        temperature_status = '[b][green]LOCKED[/green][/b]'
+        temperature_color = 'green'
     elif not data['cooler_enabled']:
-        temperature_status = TFmt.Bold + TFmt.Red + 'COOLING DISABLED' + TFmt.Clear
-        temperature_fmt = TFmt.Bold
+        temperature_status = '[b][red]COOLING DISABLED[/red][/b]'
+        temperature_color = 'default'
     else:
-        temperature_status = f'{TFmt.Bold}LOCKING ON {data["target_temperature"]:.0f}\u00B0C{TFmt.Clear}'
+        temperature_status = f'[b]LOCKING ON {data["target_temperature"]:.0f}\u00B0C[/b]'
 
-    print(f'   Temperature is {temperature_fmt}{data["temperature"]:.0f}\u00B0C{TFmt.Clear} ({temperature_status})')
+    print(f'   Temperature is [b][{temperature_color}]{data["temperature"]:.0f}\u00B0C[/{temperature_color}][/b] ({temperature_status})')
 
-    shutter_mode = TFmt.Green + 'AUTO' if data['shutter_enabled'] else TFmt.Red + 'DARK'
-    print('   Shutter mode is ' + TFmt.Bold + shutter_mode + TFmt.Clear)
-    print('   Pre-amp gain is ' + TFmt.Bold + data['gain_label'] + TFmt.Clear)
-    print(f'   Readout speed is {TFmt.Bold}{data["horizontal_shift_speed_mhz"]:.2f} MHz{TFmt.Clear}')
+    shutter_mode = '[green]AUTO[/green]' if data['shutter_enabled'] else '[red]DARK[/red]'
+    print(f'   Shutter mode is [b]{shutter_mode}[/b]')
+    print(f'   Pre-amp gain is [b]{data["gain_label"]}[/b]')
+    print(f'   Readout speed is [b]{data["horizontal_shift_speed_mhz"]:.2f} MHz[/b]')
 
     wr = data['window_region']
     wb = data['window_bin']
-    print(f'   Readout window is {TFmt.Bold}[{wr[0]}:{wr[1]},{wr[2]}:{wr[3]}] px{TFmt.Clear}')
-    print(f'   Readout binning is {TFmt.Bold}{wb[0]} x {wb[1]} px{TFmt.Clear}')
-    print(f'   Exposure time is {TFmt.Bold}{data["exposure_time"]:.2f} s{TFmt.Clear}')
+    print(f'   Readout window is [b]\[{wr[0]}:{wr[1]},{wr[2]}:{wr[3]}] px[/b]')
+    print(f'   Readout binning is [b]{wb[0]} x {wb[1]} px[/b]')
+    print(f'   Exposure time is [b]{data["exposure_time"]:.2f} s[/b]')
     return 0
 
 
