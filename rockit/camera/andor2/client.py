@@ -166,7 +166,7 @@ def set_gain(config, usage_prefix, args):
     if len(args) == 1 and args[0] in gains:
         with config.daemon.connect() as camd:
             return camd.set_gain(gains.index(args[0]))
-    print(f'usage: {usage_prefix} gain [low|medium|high]')
+    print(f'usage: {usage_prefix} gain <low|medium|high>')
     return -1
 
 
@@ -177,7 +177,7 @@ def set_horizontal_shift_speed(config, usage_prefix, args):
         index = options.index(args[0])
         with config.daemon.connect() as camd:
             return camd.set_horizontal_shift(index)
-    print(f'usage: {usage_prefix} readout [a|b|c|d]')
+    print(f'usage: {usage_prefix} readout <a|b|c|d>')
     return -1
 
 
@@ -187,7 +187,7 @@ def set_shutter(config, usage_prefix, args):
         enabled = args[0] == 'auto'
         with config.daemon.connect() as camd:
             return camd.set_shutter(enabled)
-    print(f'usage: {usage_prefix} shutter [auto|dark]')
+    print(f'usage: {usage_prefix} shutter <auto|dark>')
     return -1
 
 
@@ -217,7 +217,7 @@ def set_window(config, usage_prefix, args):
         with config.daemon.connect() as camd:
             return camd.set_window(window)
 
-    print(f'usage: {usage_prefix} window (<x1> <x2> <y1> <y2>|default)')
+    print(f'usage: {usage_prefix} window <x1 x2 y1 y2|default>')
     return -1
 
 
@@ -234,7 +234,7 @@ def start(config, usage_prefix, args):
             with config.daemon.connect() as camd:
                 return camd.start_sequence(count)
 
-    print(f'usage: {usage_prefix} start (continuous|<count>)')
+    print(f'usage: {usage_prefix} start <continuous|(count)>')
     return -1
 
 
@@ -259,7 +259,7 @@ def shutdown(config, *_):
 
 def print_usage(usage_prefix):
     """Prints the utility help"""
-    print(f'usage: {usage_prefix} <command> [<args>]')
+    print(f'usage: {usage_prefix} <command> \\[<args>]')
     print()
     print('general commands:')
     print('   status       print a human-readable summary of the camera status')
