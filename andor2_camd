@@ -54,6 +54,7 @@ class AndorStatus:
     DrvP2Invalid = 20067
     DrvP3Invalid = 20068
     DrvP4Invalid = 20069
+    DrvAcquiring = 20072
     DrvP5Invalid = 20076
     DrvP6Invalid = 20077
 
@@ -393,7 +394,16 @@ class CameraDaemon:
 
                 end_time = datetime.datetime.utcnow()
                 cdata = (c_uint16 * pixel_count).from_buffer(framedata)
-                status = self._driver.GetAcquiredData16(byref(cdata), c_long(pixel_count))
+
+                while True:
+                    status = self._driver.GetAcquiredData16(byref(cdata), c_long(pixel_count))
+                    # WaitForAcquisition sometimes returns before the acquisition is complete(?!?)
+                    # Wait a short amount of time and try again
+                    if status == AndorStatus.DrvAcquiring:
+                        time.sleep(0.01)
+                        continue
+                    break
+
                 if status != AndorStatus.Success:
                     if not self._stop_acquisition:
                         log.error(self._config.log_name, f'Failed to query frame data ({status})')
