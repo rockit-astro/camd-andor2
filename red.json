@@ -11,7 +11,7 @@
   "gain_index": 2,
   "horizontal_shift_index": 1,
   "overscan": [20, 20],
-  "filter": "Z",
+  "filter": "NONE",
   "header_card_capacity": 144,
   "camera_id": "RED",
   "output_path": "/data/incoming",
