@@ -41,7 +41,7 @@ CONFIG_SCHEMA = {
         },
         'pipeline_handover_timeout': {
             'type': 'number',
-            'min': 0
+            'minimum': 0
         },
         'log_name': {
             'type': 'string',
@@ -61,22 +61,22 @@ CONFIG_SCHEMA = {
         },
         'temperature_setpoint': {
             'type': 'number',
-            'min': -60,
-            'max': 30,
+            'minimum': -60,
+            'maximum': 30,
         },
         'temperature_query_delay': {
             'type': 'number',
-            'min': 0
+            'minimum': 0
         },
         'gain_index': {
             'type': 'integer',
-            'min': 0,
-            'max': 3,
+            'minimum': 0,
+            'maximum': 3,
         },
         'horizontal_shift_index': {
             'type': 'integer',
-            'min': 0,
-            'max': 3,
+            'minimum': 0,
+            'maximum': 3,
         },
         'overscan': {
             'type': 'array',
@@ -84,7 +84,7 @@ CONFIG_SCHEMA = {
             'maxItems': 2,
             'items': {
                 'type': 'integer',
-                'min': 0
+                'minimum': 0
             }
         },
         'filter': {
