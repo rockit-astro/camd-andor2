@@ -27,7 +27,7 @@ CONFIG_SCHEMA = {
     'required': [
         'daemon', 'pipeline_daemon', 'pipeline_handover_timeout', 'log_name', 'control_machines',
         'client_commands_module', 'camera_serial', 'camera_id', 'temperature_setpoint', 'temperature_query_delay',
-        'gain_index', 'horizontal_shift_index', 'overscan', 'filter', 'header_card_capacity', 'output_path',
+        'gain_index', 'horizontal_shift_index', 'image_region', 'filter', 'header_card_capacity', 'output_path',
         'output_prefix', 'expcount_path'
     ],
     'properties': {
@@ -78,10 +78,10 @@ CONFIG_SCHEMA = {
             'minimum': 0,
             'maximum': 3,
         },
-        'overscan': {
+        'image_region': {
             'type': 'array',
-            'minItems': 2,
-            'maxItems': 2,
+            'minItems': 4,
+            'maxItems': 4,
             'items': {
                 'type': 'integer',
                 'minimum': 0
@@ -136,7 +136,7 @@ class Config:
         self.expcount_path = config_json['expcount_path']
         self.gain_index = config_json['gain_index']
         self.horizontal_shift_index = config_json['horizontal_shift_index']
-        self.overscan = [int(config_json['overscan'][0]), int(config_json['overscan'][1])]
+        self.image_region = config_json['image_region']
         self.filter = config_json['filter']
         self.header_card_capacity = config_json['header_card_capacity']
         self.temperature_setpoint = config_json['temperature_setpoint']

@@ -119,7 +119,7 @@ def status(config, *_):
     print(f'   Pre-amp gain is [b]{data["gain_label"]}[/b]')
     print(f'   Readout speed is [b]{data["horizontal_shift_speed_mhz"]:.2f} MHz[/b]')
 
-    wr = data['window_region']
+    wr = [x + 1 for x in data['window_region']]
     wb = data['window_bin']
     print(f'   Readout window is [b]\[{wr[0]}:{wr[1]},{wr[2]}:{wr[3]}] px[/b]')
     print(f'   Readout binning is [b]{wb[0]} x {wb[1]} px[/b]')

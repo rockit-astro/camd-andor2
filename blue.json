@@ -10,7 +10,7 @@
   "temperature_query_delay": 1,
   "gain_index": 2,
   "horizontal_shift_index": 1,
-  "overscan": [0, 0],
+  "image_region": [1, 2048, 1, 2048],
   "filter": "BG40",
   "header_card_capacity": 144,
   "camera_id": "BLUE",

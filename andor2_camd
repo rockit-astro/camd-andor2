@@ -59,8 +59,38 @@ class AndorStatus:
     DrvP6Invalid = 20077
 
 
+def window_sensor_region(region, window):
+    """Calculate new region coordinates when cropped to a given window"""
+    x1 = max(0, region[0] - window[0])
+    x2 = min(region[1] - window[0], window[1] - window[0])
+    y1 = max(0, region[2] - window[2])
+    y2 = min(region[3] - window[2], window[3] - window[2])
+    if x1 > x2 or y1 > y2:
+        return None
+
+    return [x1, x2, y1, y2]
+
+
+def bin_sensor_region(region, binning):
+    """Calculate new region coordinates when binned by a given value"""
+    if region is None:
+        return region
+
+    return [
+        (region[0] + binning[0] - 1) // binning[0],
+        region[1] // binning[0],
+        (region[2] + binning[1] - 1) // binning[1],
+        region[3] // binning[1]
+    ]
+
+
+def format_sensor_region(region):
+    """Format a 0-indexed region as a 1-indexed fits region"""
+    return f'[{region[0] + 1}:{region[1] + 1},{region[2] + 1}:{region[3] + 1}]'
+
+
 def process_frames(process_queue, stop_signal, camera_id, filter_name, output_path,
-                   header_card_capacity, log_name,
+                   header_card_capacity, log_name, native_image_region,
                    pipeline_daemon_name, pipeline_handover_timeout):
     """
     Helper process to save frames to disk.
@@ -70,14 +100,15 @@ def process_frames(process_queue, stop_signal, camera_id, filter_name, output_pa
     while True:
         frame = process_queue.get()
 
-        if frame['image_region'] is not None:
-            i = frame['image_region']
-            image_region_header = ('IMAG-RGN', f'[{i[0]}:{i[1]},{i[2]}:{i[3]}]',
+        # Imaging region in binned/windowed coords
+        image_region = window_sensor_region(native_image_region, frame['window_region'])
+        image_region = bin_sensor_region(image_region, frame['window_bin'])
+        if image_region is not None:
+            image_region_header = ('IMAG-RGN', format_sensor_region(image_region),
                                    '[x1:x2,y1:y2] image region (image coords)')
         else:
             image_region_header = ('COMMENT', ' IMAG-RGN not available', '')
 
-        w = frame['window_region']
         header = [
             (None, None, None),
             ('COMMENT', ' ---                DATE/TIME                --- ', ''),
@@ -97,11 +128,12 @@ def process_frames(process_queue, stop_signal, camera_id, filter_name, output_pa
             ('TEMP-LCK', frame['temperature_locked'], 'CCD temperature is locked to set point'),
             ('CAM-XBIN', frame['window_bin'][0], '[px] x binning'),
             ('CAM-YBIN', frame['window_bin'][1], '[px] y binning'),
-            ('CAM-WIND', f'[{w[0]}:{w[1]},{w[2]}:{w[3]}]', '[x1:x2,y1:y2] readout region (detector coords)'),
             ('CAM-GAIN', frame['gain'], 'preamplifier gain setting'),
             ('CAM-RSPD', frame['horizontal_shift_speed'], '[MHz] CCD readout speed'),
-            ('SHUTTER', 'AUTO' if frame['shutter_enabled'] else 'CLOSED', 'shutter mode'),
+            ('CAM-WIND', format_sensor_region(frame['window_region']),
+             '[x1:x2,y1:y2] readout region (detector coords)'),
             image_region_header,
+            ('SHUTTER', 'AUTO' if frame['shutter_enabled'] else 'CLOSED', 'shutter mode'),
             ('EXPCNT', frame['exposure_count'], 'running exposure count since EXPCREF'),
             ('EXPCREF', frame['exposure_count_reference'], 'date the exposure counter was reset'),
             ('SHTRCNT', frame['shutter_count'], 'running shutter count since SHTRCREF'),
@@ -174,9 +206,6 @@ class CameraDaemon:
         self._window_region = [0, 0, 0, 0]
         self._window_bin = [1, 1]
 
-        # Image geometry: masking away the overscan on the red camera
-        self._image_region = [0, 0, 0, 0]
-
         # Shutter enabled (opens during exposures), or remains closed
         self._shutter_enabled = False
 
@@ -243,7 +272,7 @@ class CameraDaemon:
 
         Process(target=process_frames, daemon=True, args=(
             self._processing_queue, self._processing_stop_signal, config.camera_id, config.filter, config.output_path,
-            config.header_card_capacity, config.log_name,
+            config.header_card_capacity, config.log_name, config.image_region,
             config.pipeline_daemon_name, config.pipeline_handover_timeout)
         ).start()
 
@@ -364,6 +393,7 @@ class CameraDaemon:
             readout_width = (self._window_region[1] - self._window_region[0] + 1) // self._window_bin[0]
             readout_height = (self._window_region[3] - self._window_region[2] + 1) // self._window_bin[1]
             pixel_count = readout_width * readout_height
+
             while not self._stop_acquisition and not self._processing_stop_signal.value:
                 framedata = bytearray(pixel_count * 2)
 
@@ -435,7 +465,6 @@ class CameraDaemon:
                     'shutter_count_reference': self._shutter_count_reference,
                     'window_bin': self._window_bin,
                     'window_region': self._window_region,
-                    'image_region': self._image_region
                 })
 
                 # Continue exposure sequence?
@@ -712,14 +741,7 @@ class CameraDaemon:
                     self._ccd_width = width.value
                     self._ccd_height = height.value
                     self._window_bin = [1, 1]
-                    self._window_region = [1, self._ccd_width, 1, self._ccd_height]
-                    self._image_region = [
-                        self._config.overscan[0] + 1,
-                        self._ccd_width - self._config.overscan[1],
-                        1,
-                        self._ccd_height
-                    ]
-
+                    self._window_region = [0, self._ccd_width - 1, 0, self._ccd_height - 1]
                     self._gains = gains
                     self._horizontal_shift_speeds = speeds
                     self._status = CameraStatus.Idle
@@ -976,26 +998,9 @@ class CameraDaemon:
                 print(f'failed to set geometry {region}({binning[0]}x{binning[1]})')
                 return False
 
+            # Convert from 1-indexed to 0-indexed
+            self._window_region = [x - 1 for x in window]
             self._window_bin = binning
-            self._window_region = window
-
-            # Round prescan and postscan up to nearest binned pixel to avoid bleeding
-            prescan = int((self._config.overscan[0] + binning[0] - 1) / binning[0])
-            postscan = int((self._config.overscan[1] + binning[0] - 1) / binning[0])
-
-            # Work out how much pre/post scan columns are left in the requested window
-            window_x = int((window[0] - 1) / binning[0])
-            window_y = int((window[2] - 1) / binning[1])
-            image_x1 = 1 + max(prescan, int((window[0] - 1) / binning[0])) - window_x
-            image_x2 = min(int(self._ccd_width / binning[0]) - postscan, int(window[1] / binning[0])) - window_x
-            image_y1 = 1 + int((window[2] - 1) / binning[1]) - window_y
-            image_y2 = int(window[3] / binning[1]) - window_y
-
-            # Window is completely in the overscan
-            if image_x2 < image_x1:
-                self._image_region = None
-            else:
-                self._image_region = [image_x1, image_x2, image_y1, image_y2]
 
         return True
 
@@ -1015,7 +1020,7 @@ class CameraDaemon:
             if self._status != CameraStatus.Idle:
                 return CommandStatus.CameraNotIdle
 
-            if not self.__set_readout_window(self._window_region, [bin_x, bin_y]):
+            if not self.__set_readout_window([x + 1 for x in self._window_region], [bin_x, bin_y]):
                 return CommandStatus.BinningIncompatibleWithWindow
 
             if not quiet:
