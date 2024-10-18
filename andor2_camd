@@ -207,7 +207,7 @@ class CameraDaemon:
         self._window_bin = [1, 1]
 
         # Shutter enabled (opens during exposures), or remains closed
-        self._shutter_enabled = False
+        self._shutter_enabled = True
 
         # Gain index.
         self._gains = []
@@ -802,7 +802,7 @@ class CameraDaemon:
                 log.info(self._config.log_name, 'Cooler ' + ('enabled' if cooler else 'disabled'))
 
             # Reset shutter
-            shutter = params.get('shutter', False)
+            shutter = params.get('shutter', True)
             if self.__set_shutter(shutter) != AndorStatus.Success:
                 return CommandStatus.Failed
 
