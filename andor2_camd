@@ -384,7 +384,7 @@ class CameraDaemon:
                 print(f'failed to set exposure ({exposure_seconds}s) with status {status}')
         return status
 
-    def __run_exposure_sequence(self):
+    def __run_exposure_sequence(self, quiet):
         """Worker thread that acquires frames and their times.
            Tagged frames are pushed to the acquisition queue
            for further processing on another thread"""
@@ -481,7 +481,8 @@ class CameraDaemon:
                     'shutter_reference': self._shutter_count_reference
                 }, outfile)
 
-            log.info(self._config.log_name, 'Exposure sequence complete')
+            if not quiet:
+                log.info(self._config.log_name, 'Exposure sequence complete')
             self._status = CameraStatus.Idle
 
     @Pyro4.expose
@@ -1128,7 +1129,7 @@ class CameraDaemon:
             self._sequence_frame_limit = count
             self._sequence_frame_count = 0
             self._stop_acquisition = False
-            self._acquisition_thread = threading.Thread(target=self.__run_exposure_sequence)
+            self._acquisition_thread = threading.Thread(target=self.__run_exposure_sequence, args=(quiet,))
             self._acquisition_thread.daemon = False
             self._acquisition_thread.start()
             self._status = CameraStatus.Acquiring
