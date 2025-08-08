@@ -1,6 +1,6 @@
 Name:      rockit-camera-andor2
 Version:   %{_version}
-Release:   1
+Release:   1%{dist}
 Summary:   Control code for Andor CCD cameras
 Url:       https://github.com/rockit-astro/camd-andor2
 License:   GPL-3.0
