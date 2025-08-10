@@ -34,6 +34,8 @@ import shutil
 import threading
 import time
 from astropy.io import fits
+from astropy.time import Time
+import astropy.units as u
 import numpy
 import Pyro4
 from rockit.common import daemons, log, TryLock
@@ -230,7 +232,7 @@ class CameraDaemon:
         self._sequence_exposure_delay_start_time = None
 
         # Time that the latest frame in the exposure was started
-        self._sequence_exposure_start_time = datetime.datetime.utcnow()
+        self._sequence_exposure_start_time = Time.now()
 
         # Information for building the output filename
         self._output_directory = pathlib.Path(config.output_path)
@@ -246,7 +248,7 @@ class CameraDaemon:
                 self._shutter_count = data['shutter_count']
                 self._shutter_count_reference = data['shutter_reference']
         except Exception:
-            now = datetime.datetime.utcnow().strftime('%Y-%m-%d')
+            now = Time.now().strftime('%Y-%m-%d')
             self._exposure_count = 0
             self._exposure_count_reference = now
             self._shutter_count = 0
@@ -399,7 +401,7 @@ class CameraDaemon:
 
                 # Delay before starting exposures
                 if self._exposure_delay > 0:
-                    self._sequence_exposure_delay_start_time = datetime.datetime.utcnow()
+                    self._sequence_exposure_delay_start_time = Time.now()
                     with self._exposure_delay_condition:
                         self._exposure_delay_condition.wait(self._exposure_delay)
 
@@ -408,7 +410,7 @@ class CameraDaemon:
                         break
 
                 with self._driver_lock:
-                    start_time = datetime.datetime.utcnow()
+                    start_time = Time.now()
                     status = self._driver.StartAcquisition()
                     if status != AndorStatus.Success:
                         log.error(self._config.log_name, f'Failed to start exposure sequence ({status})')
@@ -422,7 +424,7 @@ class CameraDaemon:
                     log.error(self._config.log_name, f'Failed to wait for acquisition ({status})')
                     break
 
-                end_time = datetime.datetime.utcnow()
+                end_time = Time.now()
                 cdata = (c_uint16 * pixel_count).from_buffer(framedata)
 
                 while True:
@@ -449,8 +451,8 @@ class CameraDaemon:
 
                 self._processing_queue.put({
                     'data': data,
-                    'start_time': start_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3],
-                    'end_time': end_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3],
+                    'start_time': start_time.isot,
+                    'end_time': end_time.isot,
                     'exposure': self._exposure_time,
                     'camera_desc': f'{self._camera_model} ({self._config.camera_serial})',
                     'temperature': self._temperature,
@@ -529,11 +531,11 @@ class CameraDaemon:
             if self._status == CameraStatus.Acquiring:
                 if self._sequence_exposure_delay_start_time:
                     data['state'] = CameraStatus.Waiting
-                    delta = datetime.datetime.utcnow() - self._sequence_exposure_delay_start_time
-                    delay_progress = delta.total_seconds()
+                    delta = Time.now() - self._sequence_exposure_delay_start_time
+                    delay_progress = delta.to_value(u.s)
                 else:
-                    delta = datetime.datetime.utcnow() - self._sequence_exposure_start_time
-                    exposure_progress = delta.total_seconds()
+                    delta = Time.now() - self._sequence_exposure_start_time
+                    exposure_progress = delta.to_value(u.s)
                     if exposure_progress > self._exposure_time:
                         data['state'] = CameraStatus.Reading
                         exposure_progress = 0
